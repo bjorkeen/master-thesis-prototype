@@ -1,0 +1,17 @@
+# FastAPI and server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Data processing — pin to what the model was trained with so joblib files are compatible
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Machine learning — MUST match the version used in data/train_model.py
+scikit-learn>=1.6.0
+joblib>=1.3.0
+
+# Explainability — MUST match training version
+shap>=0.51.0
+
+# Utilities
+python-multipart>=0.0.6
