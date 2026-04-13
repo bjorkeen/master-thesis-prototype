@@ -1,0 +1,98 @@
+# cost_model.yaml
+# ================
+# Operational cost values for evaluating decision quality in the HITL-CDT system.
+#
+# Each combination of actual class + predicted action has a cost:
+# - Correct decisions have low/zero cost (or net-positive benefit)
+# - Wrong decisions incur higher costs (opportunity loss, SLA breach, etc.)
+#
+# The cost model is used in:
+#   1. Decision Service: to log cost of each decision for offline analysis
+#   2. Experiment evaluation: to compute weighted cost across all decisions
+#   3. Human override justification: cost-benefit of human choice vs AI recommendation
+#
+# All values are in arbitrary units (euros in the thesis, but can be rescaled).
+# The relative magnitudes matter, not the absolute numbers.
+
+# ---- Correct decisions (ground truth = prediction) ----
+
+# correct_auto_resolve: cost when AI correctly predicted auto-resolve (no human review).
+# Value = 0 because this is the desired outcome: fully automatic, instant resolution.
+correct_auto_resolve: 0
+
+# correct_escalation: cost when AI correctly sent to escalation & human agreed.
+# Value = 10 (small cost) because escalation requires human time (~5–10 min analyst review).
+# This is still much cheaper than missing a critical incident.
+correct_escalation: 10
+
+# correct_critical: cost when AI correctly flagged 'critical' & human confirmed.
+# Value = 15 (slightly higher) because critical incidents get extra urgency/context,
+# though they are handled by on-call engineer (faster SLA than regular escalation).
+correct_critical: 15
+
+# ---- Incorrect decisions (ground truth ≠ prediction) ----
+
+# false_escalation: cost when AI escalated but incident was routine (auto-resolve).
+# Example: analyst spends 5 min reviewing something the model could've handled instantly.
+# Value = 10 (modest cost, lower than missed critical because SLA isn't breached).
+false_escalation: 10
+
+# missed_escalation: cost when AI routed as auto-resolve but incident needed review.
+# Example: a subtle data schema shift got auto-resolved, causing downstream analytics
+#          to break over the next 2 hours before manually caught.
+# Value = 50 (moderate–high cost: delayed detection, potential data loss).
+missed_escalation: 50
+
+# missed_critical: cost when AI routed as escalate/auto-resolve but incident was critical.
+# Example: a critical data corruption in the data warehouse got sent to regular escalation
+#          queue instead of on-call, causing 3-hour SLA breach.
+# Value = 100 (very high cost: SLA breach, potential business impact, escalation to management).
+#
+# NOTE: This 100:10 ratio (missed_critical:false_escalation) is why the routing thresholds
+#       are skewed conservative (auto_resolve needs >85% confidence).
+missed_critical: 100
+
+# ---- Human override costs ----
+
+# human_misclassification: cost when a human analyst made a wrong override decision.
+# Example: analyst disagreed with AI's 'escalate' recommendation and chose to auto-resolve,
+#          but the incident actually needed review (e.g., analyst was tired/distracted).
+# Value = 30 (moderate cost: usually caught within SLA, but causes extra work later).
+#
+# NOTE: This is NOT the cost of the override itself, but the cost when the human's
+#       judgment turned out to be incorrect. A correct override has cost 0.
+human_misclassification: 30
+
+# ---- Experiment evaluation aggregation ----
+
+# summary_metric: how to summarize per-decision costs into a single experiment score.
+# Options:
+#   "total_cost" – sum all per-decision costs (default, fair when incident counts differ)
+#   "mean_cost"  – average cost per incident (normalized by incident count)
+#   "weighted_f1" – F1 score weighted by cost (penalizes expensive mistakes more)
+summary_metric: "total_cost"
+
+# ---- Thresholds for alerts ----
+
+# alert_threshold_cost_per_incident: if avg cost per incident exceeds this,
+# flag the experiment as "suboptimal" for review (e.g., system is escalating too much).
+alert_threshold_cost_per_incident: 20
+
+# alert_threshold_missed_critical_pct: if % of missed critical incidents exceeds this,
+# flag for immediate review (safety issue).
+alert_threshold_missed_critical_pct: 5
+
+# ---- Cost adjustments for time of day / batch effects ----
+
+# (future extension) allow cost model to vary by time of day or incident type.
+# For now, costs are static. Uncomment below if needed.
+
+# time_of_day_adjustments:
+#   business_hours:    { multiplier: 1.0 }   # 9-5, peak analyst utilization
+#   after_hours:       { multiplier: 1.5 }   # midnight-6am, on-call only, slower
+#   weekend:           { multiplier: 2.0 }   # weekends, skeleton crew
+
+# incident_type_adjustments:
+#   data_corruption:   { multiplier: 2.0 }   # very costly if missed
+#   duplicates:        { multiplier: 0.8 }   # usually caught quickly anyway
+#   null_values:       { multiplier: 1.2 }   # moderate impact

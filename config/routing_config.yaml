@@ -1,0 +1,93 @@
+# routing_config.yaml
+# =====================
+# Decision routing thresholds and behavior control for the Data Quality Incident Management system.
+#
+# The Decision Service (services/decision-service/main.py) reads this file to determine
+# which incidents are routed as 'auto-resolve', 'escalate', or 'critical'.
+#
+# Routing logic (pseudocode):
+#   1. ML service predicts confidence ∈ [0, 1] for the incident
+#   2. If confidence > auto_resolve_threshold → route='auto_resolve'
+#   3. Else if confidence < critical_threshold → route='critical'
+#   4. Else → route='escalate' (human review with AI explanation)
+#
+# The thresholds are based on asymmetric costs: missing a critical incident is 10x worse
+# than false-escalating a routine one, so we're conservative about auto-resolve.
+
+# ---- Confidence-based thresholds ----
+
+# auto_resolve_threshold: confidence above this allows automatic resolution
+# Rationale: we want to be VERY confident before auto-resolving. A missed
+# routine incident costs €0, but a false critical costs €100.
+# >85% confidence means the model agrees strongly with the decision.
+auto_resolve_threshold: 0.85
+
+# critical_threshold: confidence below this marks an incident as 'critical'
+# (requires immediate human attention, bypassing the normal escalation flow).
+# Rationale: <50% confidence means the model is nearly random. Better to flag
+# for immediate action than risk a 2-hour SLA breach waiting for analyst review.
+critical_threshold: 0.50
+
+# ---- SLA and time-pressure behavior ----
+
+# sla_escalation_boost: if true, reduce the above thresholds proportionally as
+# the SLA deadline approaches. This converts "ambiguous" into "critical"
+# to ensure coverage within SLA window.
+# Implementation: as sla_remaining_seconds decreases, the effective thresholds
+# are adjusted downward (raising the bar for auto-resolve, lowering for critical).
+sla_escalation_boost: true
+
+# sla_boost_schedule: when to apply which boost factors as SLA drains.
+# (used in Twin Service to adjust thresholds based on remaining time)
+sla_boost_schedule:
+  # Once ≤10 minutes remain, lower auto_resolve_threshold by 10%
+  # (from 0.85 → 0.765) to be extra conservative
+  minutes_remaining_10:
+    auto_resolve_threshold_reduction: 0.10
+    critical_threshold_increase: 0.05
+
+  # Once ≤5 minutes remain, lower even more
+  minutes_remaining_5:
+    auto_resolve_threshold_reduction: 0.20 # 0.85 → 0.68
+    critical_threshold_increase: 0.10 # 0.50 → 0.60
+
+# ---- Experiment control ----
+
+# default_experiment_mode: which mode runs when /experiment/start is called
+# without an explicit mode parameter. Options: 'ai_only', 'human_only', 'hitl'
+default_experiment_mode: "hitl"
+
+# max_incidents_per_experiment: safety limit on dataset size per run.
+# (prevents runaway experiments from consuming all 3,000 incidents at once)
+max_incidents_per_experiment: 500
+
+# ---- Twin service integration ----
+
+# enable_twin_state_sync: if true, the Decision Service periodically polls
+# the Twin Service for pipeline state (queue depth, analyst workload, SLA,
+# etc.) and adjusts routing in real-time based on workload.
+enable_twin_state_sync: true
+
+# twin_service_url: where the Twin Service is running (used by Decision Service)
+twin_service_url: "http://localhost:8002"
+
+# ml_service_url: where the ML Service is running
+ml_service_url: "http://localhost:8001"
+
+# database: connection params for logging decisions / experiment results
+database:
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  name: "hitl_cdt"
+
+# ---- Analyst workload limits ----
+
+# max_escalated_queue_depth: if escalated queue exceeds this, lower critical_threshold
+# (force more incidents to 'critical' to pull pressure off escalation backlog)
+max_escalated_queue_depth: 20
+
+# analyst_workload_high_threshold_pct: if analyst utilization exceeds this %,
+# increase auto_resolve_threshold (only let through very high-confidence predictions)
+analyst_workload_high_threshold_pct: 75
