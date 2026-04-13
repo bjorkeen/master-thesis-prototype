@@ -1,0 +1,9 @@
+[
+  "anomaly_type",
+  "affected_records_pct",
+  "data_source",
+  "pipeline_stage",
+  "historical_frequency",
+  "time_sensitivity",
+  "data_domain"
+]
