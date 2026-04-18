@@ -1,0 +1,19 @@
+{
+  "name": "hitl-cdt-gateway",
+  "version": "1.0.0",
+  "description": "API gateway for HITL-CDT — proxies React frontend to Python services",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "npx nodemon index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "http-proxy-middleware": "^3.0.3",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
