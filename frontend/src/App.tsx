@@ -57,7 +57,7 @@ export default function App() {
   function renderPanel() {
     switch (activePanel) {
       case 'queue':      return <IncidentQueue onSelect={setSelectedIncidentId} />;
-      case 'shap':       return <ShapExplainer />;
+      case 'shap':       return <ShapExplainer incidentId={selectedIncidentId} />;
       case 'decision':   return <DecisionPanel />;
       case 'twin':       return <TwinStatePanel twinState={twinState} connected={connected} />;
       case 'analytics':  return <AnalyticsDashboard />;
@@ -65,8 +65,6 @@ export default function App() {
     }
   }
 
-  // Suppress unused-variable warning until ShapExplainer / DecisionPanel use it
-  void selectedIncidentId;
 
   return (
     <div className="flex h-screen" style={{ backgroundColor: '#0E0F14' }}>
