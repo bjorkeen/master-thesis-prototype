@@ -28,30 +28,50 @@ const server = http.createServer(app);
 app.use(cors({ origin: ["http://localhost:5173", "http://localhost:4000"] }));
 
 // --------------------------------------------------------------------------
-// Proxy helper — strips the /api prefix before forwarding.
+// Proxy helpers — each service needs its own pathRewrite because the path
+// prefixes differ per service.
 //
 // WHY pathFilter instead of app.use(path, middleware):
 //   In hpm v3, when you mount via app.use("/api/experiment", middleware),
 //   Express strips the mount prefix before hpm sees the URL — so hpm
 //   receives "/start" instead of "/api/experiment/start" and pathRewrite
 //   never matches.  Using pathFilter attaches the middleware at the root,
-//   so hpm sees the full URL and can strip /api correctly.
+//   so hpm sees the full URL and can strip the correct prefix.
 // --------------------------------------------------------------------------
-function proxy(target, paths) {
-  return createProxyMiddleware({
-    target,
-    changeOrigin: true,
-    pathFilter: paths,               // hpm v3: glob patterns to match
-    pathRewrite: { "^/api": "" },   // /api/experiment/start → /experiment/start
-  });
-}
+
+// ML Service: /api/predict/... → /predict/..., /api/explain/... → /explain/..., etc.
+// Strips only "/api" — the remaining path (/predict, /explain, /model) is correct.
+const mlProxy = createProxyMiddleware({
+  target: "http://localhost:8001",
+  changeOrigin: true,
+  pathFilter: ["/api/predict/**", "/api/explain/**", "/api/model/**"],
+  pathRewrite: { "^/api": "" },   // /api/predict/batch → /predict/batch
+});
+
+// Twin Service: /api/twin/state → /state, /api/twin/sla → /sla, etc.
+// Must strip "/api/twin" (not just "/api") because Twin endpoints have no /twin prefix.
+const twinProxy = createProxyMiddleware({
+  target: "http://localhost:8002",
+  changeOrigin: true,
+  pathFilter: ["/api/twin/**"],
+  pathRewrite: { "^/api/twin": "" },  // /api/twin/state → /state
+});
+
+// Decision Service: /api/decisions/... → /decisions/..., /api/experiment/... → /experiment/..., etc.
+// Strips only "/api" — the remaining path (/decisions, /experiment, /config, /route) is correct.
+const decisionProxy = createProxyMiddleware({
+  target: "http://localhost:8003",
+  changeOrigin: true,
+  pathFilter: ["/api/decisions/**", "/api/experiment/**", "/api/config/**", "/api/route/**"],
+  pathRewrite: { "^/api": "" },   // /api/decisions/log → /decisions/log
+});
 
 // --------------------------------------------------------------------------
 // Route → service mapping  (all mounted at root so full URL reaches hpm)
 // --------------------------------------------------------------------------
-app.use(proxy("http://localhost:8001", ["/api/predict/**", "/api/explain/**", "/api/model/**"]));
-app.use(proxy("http://localhost:8002", ["/api/twin/**"]));
-app.use(proxy("http://localhost:8003", ["/api/decisions/**", "/api/experiment/**", "/api/config/**"]));
+app.use(mlProxy);
+app.use(twinProxy);
+app.use(decisionProxy);
 
 // --------------------------------------------------------------------------
 // Simple health check for the gateway itself
@@ -96,6 +116,6 @@ const PORT = process.env.PORT ?? 4000;
 server.listen(PORT, () => {
   console.log(`Gateway listening on http://localhost:${PORT}`);
   console.log(`  ML       → http://localhost:8001  (via /api/predict, /api/explain, /api/model)`);
-  console.log(`  Twin     → http://localhost:8002  (via /api/twin)`);
-  console.log(`  Decision → http://localhost:8003  (via /api/decisions, /api/experiment, /api/config)`);
+  console.log(`  Twin     → http://localhost:8002  (via /api/twin  →  strips /api/twin)`);
+  console.log(`  Decision → http://localhost:8003  (via /api/route, /api/decisions, /api/experiment, /api/config)`);
 });

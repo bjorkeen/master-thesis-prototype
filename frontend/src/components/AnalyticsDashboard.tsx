@@ -77,8 +77,9 @@ export function AnalyticsDashboard() {
   }, [get]);
 
   // Chart 1: count of decisions per action type (from stats.by_action)
+  // Guard: by_action may be undefined/null when no decisions exist yet
   const actionData = stats
-    ? Object.entries(stats.by_action).map(([action, count]) => ({
+    ? Object.entries(stats.by_action ?? {}).map(([action, count]) => ({
         action: ACTION_LABEL[action] ?? action, count,
         color: ACTION_COLOR[action] ?? '#4C8BF5',
       }))
@@ -107,7 +108,7 @@ export function AnalyticsDashboard() {
   const costColor = !stats ? '#E8E9F0'
     : stats.total_cost < 50 ? '#3EBD8C' : stats.total_cost < 200 ? '#E8913A' : '#E5534B';
 
-  const hasData = !loading && !error && stats && stats.total_decisions > 0;
+  const hasData = !loading && !error && stats != null && (stats.total_decisions ?? 0) > 0;
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#0E0F14', color: '#E8E9F0' }}>

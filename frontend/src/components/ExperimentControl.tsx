@@ -134,13 +134,13 @@ export function ExperimentControl() {
             <button onClick={handleStart} disabled={busy}
               className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-opacity"
               style={{ backgroundColor: '#3EBD8C', color: '#fff', opacity: busy ? 0.5 : 1 }}>
-              <Play size={16} fill="#fff" /> {busy ? 'Starting…' : '▶ Start Experiment'}
+              <Play size={16} fill="#fff" /> {busy ? 'Starting…' : 'Start Experiment'}
             </button>
           ) : (
             <button onClick={handleStop} disabled={busy}
               className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold transition-opacity"
               style={{ backgroundColor: '#E5534B', color: '#fff', opacity: busy ? 0.5 : 1 }}>
-              <Square size={16} fill="#fff" /> {busy ? 'Stopping…' : '■ Stop Experiment'}
+              <Square size={16} fill="#fff" /> {busy ? 'Stopping…' : 'Stop Experiment'}
             </button>
           )}
           {error && <p className="text-xs mt-2" style={{ color: '#E5534B' }}>Error: {error}</p>}
