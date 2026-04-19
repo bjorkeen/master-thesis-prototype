@@ -53,18 +53,11 @@ export default function App() {
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const { twinState, connected } = useWebSocket();
 
-  // Render the active panel — pass selectedIncidentId down to panels that need it
-  function renderPanel() {
-    switch (activePanel) {
-      case 'queue':      return <IncidentQueue onSelect={setSelectedIncidentId} />;
-      case 'shap':       return <ShapExplainer incidentId={selectedIncidentId} />;
-      case 'decision':   return <DecisionPanel incidentId={selectedIncidentId} />;
-      case 'twin':       return <TwinStatePanel twinState={twinState} connected={connected} />;
-      case 'analytics':  return <AnalyticsDashboard />;
-      case 'experiment': return <ExperimentControl />;
-    }
+  // All panels are always mounted; only the active one is visible.
+  // This preserves component state (e.g. a running experiment) across navigation.
+  function panelStyle(key: PanelKey): React.CSSProperties {
+    return activePanel === key ? { display: 'flex', flexDirection: 'column', height: '100%' } : { display: 'none' };
   }
-
 
   return (
     <div className="flex h-screen" style={{ backgroundColor: '#0E0F14' }}>
@@ -121,10 +114,27 @@ export default function App() {
       </aside>
 
       {/* ----------------------------------------------------------------- */}
-      {/* Main content                                                       */}
+      {/* Main content — all panels stay mounted, inactive ones are hidden   */}
       {/* ----------------------------------------------------------------- */}
       <main className="flex-1 overflow-auto">
-        {renderPanel()}
+        <div style={panelStyle('queue')}>
+          <IncidentQueue onSelect={setSelectedIncidentId} />
+        </div>
+        <div style={panelStyle('shap')}>
+          <ShapExplainer incidentId={selectedIncidentId} />
+        </div>
+        <div style={panelStyle('decision')}>
+          <DecisionPanel incidentId={selectedIncidentId} />
+        </div>
+        <div style={panelStyle('twin')}>
+          <TwinStatePanel twinState={twinState} connected={connected} />
+        </div>
+        <div style={panelStyle('analytics')}>
+          <AnalyticsDashboard />
+        </div>
+        <div style={panelStyle('experiment')}>
+          <ExperimentControl />
+        </div>
       </main>
 
     </div>
