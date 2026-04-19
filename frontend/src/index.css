@@ -1,0 +1,17 @@
+/* Tailwind v4 — single import replaces the old three @tailwind directives */
+@import "tailwindcss";
+
+/* Reset #root back to full-width so our sidebar layout works */
+#root {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  text-align: left;
+  border: none;
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
