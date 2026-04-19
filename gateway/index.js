@@ -28,29 +28,30 @@ const server = http.createServer(app);
 app.use(cors({ origin: ["http://localhost:5173", "http://localhost:4000"] }));
 
 // --------------------------------------------------------------------------
-// Proxy helper — strips the /api prefix before forwarding
+// Proxy helper — strips the /api prefix before forwarding.
+//
+// WHY pathFilter instead of app.use(path, middleware):
+//   In hpm v3, when you mount via app.use("/api/experiment", middleware),
+//   Express strips the mount prefix before hpm sees the URL — so hpm
+//   receives "/start" instead of "/api/experiment/start" and pathRewrite
+//   never matches.  Using pathFilter attaches the middleware at the root,
+//   so hpm sees the full URL and can strip /api correctly.
 // --------------------------------------------------------------------------
-function proxy(target) {
+function proxy(target, paths) {
   return createProxyMiddleware({
     target,
     changeOrigin: true,
-    // /api/predict/batch  →  /predict/batch
-    pathRewrite: { "^/api": "" },
+    pathFilter: paths,               // hpm v3: glob patterns to match
+    pathRewrite: { "^/api": "" },   // /api/experiment/start → /experiment/start
   });
 }
 
 // --------------------------------------------------------------------------
-// Route → service mapping
+// Route → service mapping  (all mounted at root so full URL reaches hpm)
 // --------------------------------------------------------------------------
-app.use("/api/predict",    proxy("http://localhost:8001"));
-app.use("/api/explain",    proxy("http://localhost:8001"));
-app.use("/api/model",      proxy("http://localhost:8001"));
-
-app.use("/api/twin",       proxy("http://localhost:8002"));
-
-app.use("/api/decisions",  proxy("http://localhost:8003"));
-app.use("/api/experiment", proxy("http://localhost:8003"));
-app.use("/api/config",     proxy("http://localhost:8003"));
+app.use(proxy("http://localhost:8001", ["/api/predict/**", "/api/explain/**", "/api/model/**"]));
+app.use(proxy("http://localhost:8002", ["/api/twin/**"]));
+app.use(proxy("http://localhost:8003", ["/api/decisions/**", "/api/experiment/**", "/api/config/**"]));
 
 // --------------------------------------------------------------------------
 // Simple health check for the gateway itself
