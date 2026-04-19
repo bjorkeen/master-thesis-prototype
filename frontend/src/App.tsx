@@ -58,7 +58,7 @@ export default function App() {
     switch (activePanel) {
       case 'queue':      return <IncidentQueue onSelect={setSelectedIncidentId} />;
       case 'shap':       return <ShapExplainer incidentId={selectedIncidentId} />;
-      case 'decision':   return <DecisionPanel />;
+      case 'decision':   return <DecisionPanel incidentId={selectedIncidentId} />;
       case 'twin':       return <TwinStatePanel twinState={twinState} connected={connected} />;
       case 'analytics':  return <AnalyticsDashboard />;
       case 'experiment': return <ExperimentControl />;
