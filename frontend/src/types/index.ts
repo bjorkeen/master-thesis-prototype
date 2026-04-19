@@ -72,20 +72,17 @@ export interface SlaStatus {
 
 // ---------------------------------------------------------------------------
 // ShapExplanation — feature-level explanation for one incident
+//
+// The ML Service returns three parallel arrays; the component zips them.
 // ---------------------------------------------------------------------------
-export interface ShapFeatureValue {
-  feature: string;    // e.g. "time_sensitivity"
-  value: number;      // raw SHAP value (positive = pushes toward the class)
-  display: string;    // human-readable feature value, e.g. "high"
-}
-
 export interface ShapExplanation {
   incident_id: string;
-  explain_class: string;       // usually "escalate"
-  base_value: number;          // SHAP base (expected model output)
-  predicted_probability: number;
-  shap_values: ShapFeatureValue[];
-  feature_names: string[];
+  predicted_class: string;              // what the model predicted, e.g. "escalate"
+  explained_class: string;             // which class SHAP values explain (usually same)
+  base_value: number;                  // SHAP base value (expected model output)
+  shap_values: number[];               // one float per feature
+  feature_names: string[];             // parallel — feature identifiers
+  feature_values: (string | number)[]; // parallel — actual values for this incident
 }
 
 // ---------------------------------------------------------------------------

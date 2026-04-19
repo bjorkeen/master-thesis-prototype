@@ -17,7 +17,14 @@ import {
   ReferenceLine, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { useApi } from '../hooks/useApi';
-import type { ShapExplanation, ShapFeatureValue } from '../types';
+import type { ShapExplanation } from '../types';
+
+// Internal shape after zipping the three parallel arrays from the API
+interface ShapFeatureValue {
+  feature: string;
+  value: number;
+  display: string;
+}
 
 export interface Props { incidentId: string | null; }
 
@@ -31,8 +38,6 @@ const REC_COLOR: Record<string, string> = {
 };
 
 // ---- helpers ----
-
-function pct(v: number) { return `${(v * 100).toFixed(1)}%`; }
 
 // Small labelled stat strip shown above the chart
 function Chip({ label, value, color }: { label: string; value: string; color: string }) {
@@ -70,10 +75,21 @@ export function ShapExplainer({ incidentId }: Props) {
       .finally(() => setLoading(false));
   }, [incidentId, get]);
 
-  // Sort features by |SHAP value| so the most impactful appear at the top
-  const sorted: ShapFeatureValue[] = expl
-    ? [...expl.shap_values].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-    : [];
+  // Zip the three parallel arrays the API returns into [{feature, value, display}]
+  // then sort by |SHAP value| so the most impactful features appear at the top.
+  const sorted: ShapFeatureValue[] = (() => {
+    if (!expl) return [];
+    const names  = expl.feature_names  ?? [];
+    const values = expl.shap_values    ?? [];
+    const featureVals = expl.feature_values ?? [];
+    return values
+      .map((v, i) => ({
+        feature: names[i] ?? `feature_${i}`,
+        value:   v,
+        display: String(featureVals[i] ?? '—'),
+      }))
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  })();
 
   // Recharts expects an array of plain objects
   const chartData = sorted.map(sv => ({
@@ -116,11 +132,12 @@ export function ShapExplainer({ incidentId }: Props) {
           <>
             {/* Summary chips */}
             <div className="flex flex-wrap gap-5 mb-6">
-              <Chip label="AI recommends" value={expl.explain_class.replace(/_/g, ' ')}
-                color={REC_COLOR[expl.explain_class] ?? '#4C8BF5'} />
-              <Chip label="Confidence"   value={pct(expl.predicted_probability)} color="#E8E9F0" />
-              <Chip label="Explaining"   value={`${expl.explain_class} class`}   color="#B0B3C6" />
-              <Chip label="Base value"   value={expl.base_value.toFixed(3)}      color="#B0B3C6" />
+              <Chip label="Predicted"  value={(expl.predicted_class ?? '—').replace(/_/g, ' ')}
+                color={REC_COLOR[expl.predicted_class ?? ''] ?? '#4C8BF5'} />
+              <Chip label="Explaining" value={(expl.explained_class ?? '—').replace(/_/g, ' ')}
+                color="#B0B3C6" />
+              <Chip label="Base value" value={expl.base_value != null ? expl.base_value.toFixed(3) : '—'}
+                color="#B0B3C6" />
             </div>
 
             {/* Bar chart */}
