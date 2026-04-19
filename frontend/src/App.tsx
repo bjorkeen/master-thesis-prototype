@@ -50,12 +50,13 @@ const NAV_ITEMS: { key: PanelKey; label: string; Icon: React.ElementType }[] = [
 // ---------------------------------------------------------------------------
 export default function App() {
   const [activePanel, setActivePanel] = useState<PanelKey>('queue');
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const { twinState, connected } = useWebSocket();
 
-  // Render the active panel
+  // Render the active panel — pass selectedIncidentId down to panels that need it
   function renderPanel() {
     switch (activePanel) {
-      case 'queue':      return <IncidentQueue />;
+      case 'queue':      return <IncidentQueue onSelect={setSelectedIncidentId} />;
       case 'shap':       return <ShapExplainer />;
       case 'decision':   return <DecisionPanel />;
       case 'twin':       return <TwinStatePanel twinState={twinState} connected={connected} />;
@@ -64,37 +65,42 @@ export default function App() {
     }
   }
 
+  // Suppress unused-variable warning until ShapExplainer / DecisionPanel use it
+  void selectedIncidentId;
+
   return (
-    <div className="flex h-screen bg-gray-100 text-gray-900">
+    <div className="flex h-screen" style={{ backgroundColor: '#0E0F14' }}>
 
       {/* ----------------------------------------------------------------- */}
       {/* Sidebar                                                            */}
       {/* ----------------------------------------------------------------- */}
-      <aside className="w-56 flex-shrink-0 bg-gray-900 text-gray-100 flex flex-col">
-
+      <aside
+        className="w-56 flex-shrink-0 flex flex-col"
+        style={{ backgroundColor: '#16171E', borderRight: '1px solid #2A2B38', color: '#E8E9F0' }}
+      >
         {/* Logo / title */}
-        <div className="px-5 py-5 border-b border-gray-700">
-          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400">
+        <div className="px-5 py-5" style={{ borderBottom: '1px solid #2A2B38' }}>
+          <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: '#4C8BF5' }}>
             HITL-CDT
           </p>
-          <p className="text-sm text-gray-300 mt-0.5 leading-tight">
+          <p className="text-sm mt-0.5 leading-tight" style={{ color: '#B0B3C6' }}>
             Cognitive Digital Twin
           </p>
         </div>
 
         {/* Nav links */}
-        <nav className="flex-1 py-4 space-y-1 px-2">
+        <nav className="flex-1 py-4 space-y-0.5 px-2">
           {NAV_ITEMS.map(({ key, label, Icon }) => {
             const active = activePanel === key;
             return (
               <button
                 key={key}
                 onClick={() => setActivePanel(key)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                  ${active
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-                  }`}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                style={{
+                  backgroundColor: active ? 'rgba(76,139,245,0.15)' : 'transparent',
+                  color: active ? '#4C8BF5' : '#B0B3C6',
+                }}
               >
                 <Icon size={16} />
                 {label}
@@ -103,20 +109,23 @@ export default function App() {
           })}
         </nav>
 
-        {/* WebSocket status indicator at the bottom */}
-        <div className="px-4 py-3 border-t border-gray-700 flex items-center gap-2 text-xs">
+        {/* WebSocket status indicator */}
+        <div
+          className="px-4 py-3 flex items-center gap-2 text-xs"
+          style={{ borderTop: '1px solid #2A2B38' }}
+        >
           {connected
-            ? <><Wifi size={13} className="text-green-400" /><span className="text-green-400">Live</span></>
-            : <><WifiOff size={13} className="text-gray-500" /><span className="text-gray-500">Disconnected</span></>
+            ? <><Wifi size={13} style={{ color: '#3EBD8C' }} /><span style={{ color: '#3EBD8C' }}>Live</span></>
+            : <><WifiOff size={13} style={{ color: '#6B7080' }} /><span style={{ color: '#6B7080' }}>Disconnected</span></>
           }
-          <span className="text-gray-600 ml-auto">:4000</span>
+          <span className="ml-auto" style={{ color: '#4A4D60' }}>:4000</span>
         </div>
       </aside>
 
       {/* ----------------------------------------------------------------- */}
       {/* Main content                                                       */}
       {/* ----------------------------------------------------------------- */}
-      <main className="flex-1 overflow-auto bg-white rounded-tl-2xl shadow-inner">
+      <main className="flex-1 overflow-auto">
         {renderPanel()}
       </main>
 
