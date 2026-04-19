@@ -12,15 +12,17 @@ The system classifies data quality incidents into three categories:
 Three experimental modes are compared: AI-only, Human-only, and HITL (collaborative).
 
 ## Architecture
-- **Frontend**: React + TypeScript (Vite, Tailwind CSS, Recharts, Radix UI) on port 5173
+- **Frontend**: React + TypeScript (Vite, Tailwind CSS, Recharts, Lucide) on port 5173
 - **API Gateway**: Node.js Express + Socket.io on port 4000
 - **ML Service**: Python FastAPI on port 8001 (scikit-learn RandomForest + SHAP)
 - **Twin Service**: Python FastAPI on port 8002 (pipeline state engine)
 - **Decision Service**: Python FastAPI on port 8003 (routing logic + decision logging)
-- **Database**: PostgreSQL on port 5432 (or SQLite fallback)
+- **Database**: SQLite (`data/hitl_cdt.db`) via `data/db.py` + `data/create_tables.py`
 
 ## Current Build Status
-COMPLETED:
+ALL PHASES COMPLETE.
+
+### Phase 1 — Data Science Foundation
 - data/generate_dataset.py — generates 3,000 synthetic incidents (60/30/10 distribution, ~32% ambiguity zone)
 - data/train_model.py — trains RandomForest (200 trees, balanced weights), generates SHAP plots
 - data/incidents.csv — 3,000 rows, 7 features + severity scores + ground truth labels
@@ -30,14 +32,27 @@ COMPLETED:
 - data/feature_names.json — ordered list of 7 feature column names
 - config/routing_config.yaml — thresholds (auto≥0.85, critical<0.50), SLA boost schedule
 - config/cost_model.yaml — asymmetric costs (missed_critical=100, false_escalation=10)
-- services/ml-service/main.py — FastAPI :8001, endpoints: POST /predict, POST /predict/batch, POST /explain/features, GET /explain/{id}, GET /explain/global, GET /model/info, GET /health
-- services/twin-service/main.py — FastAPI :8002, endpoints: GET /state, POST /state/event, GET /state/history, GET /sla, POST /simulate, POST /reset, GET /health
-- services/decision-service/main.py — FastAPI :8003, endpoints: POST /route, POST /decisions, POST /decisions/{id}/override, GET /decisions/log, GET /decisions/stats, POST /experiment/start, POST /experiment/stop, GET /experiment/results, GET /experiment/export, GET /health
 
-NOT YET BUILT:
-- Database setup (PostgreSQL tables or SQLite fallback) — NEXT STEP
-- gateway/ — Node.js Express + Socket.io API gateway on port 4000
-- frontend/ — React SPA with components: IncidentQueue, ShapExplainer, DecisionPanel, TwinStatePanel, AnalyticsDashboard, ExperimentControl
+### Phase 2 — Python Microservices
+- services/ml-service/main.py — FastAPI :8001, ~518 lines
+- services/twin-service/main.py — FastAPI :8002, ~660 lines
+- services/decision-service/main.py — FastAPI :8003, ~937 lines
+
+### Phase 3 — Database + Gateway + Frontend
+- data/db.py — SQLite connection helper, table definitions, CRUD functions
+- data/create_tables.py — creates the 4 tables (incidents, decisions, twin_snapshots, experiment_runs)
+- data/hitl_cdt.db — live SQLite database file
+- gateway/index.js — Node.js Express :4000, http-proxy-middleware v3, Socket.io WebSocket
+- frontend/src/App.tsx — root layout, sidebar nav, WebSocket hook, all panels always mounted
+- frontend/src/components/IncidentQueue.tsx — incident list, status badges, select for explanation
+- frontend/src/components/ShapExplainer.tsx — SHAP horizontal bar chart, feature table
+- frontend/src/components/DecisionPanel.tsx — AI recommendation + human override form
+- frontend/src/components/TwinStatePanel.tsx — live pipeline state gauges via WebSocket
+- frontend/src/components/AnalyticsDashboard.tsx — accuracy/cost/override charts (Recharts)
+- frontend/src/components/ExperimentControl.tsx — mode selector, start/stop, results display
+- frontend/src/hooks/useApi.ts — typed GET/POST wrapper around fetch
+- frontend/src/hooks/useWebSocket.ts — Socket.io client, twin state subscription
+- frontend/src/types/index.ts — TypeScript interfaces for all API response shapes
 
 ## Key Design Parameters
 - Dataset: 3,000 synthetic incidents (60% auto_resolve, 30% escalate, 10% critical)
@@ -62,37 +77,60 @@ NOT YET BUILT:
 ## Project Structure
 ```
 hitl-cdt/
-├── data/                    # Dataset generation + ML training
-│   ├── generate_dataset.py  # Creates incidents.csv (3,000 rows)
-│   ├── train_model.py       # Trains RF + SHAP, saves artefacts
-│   ├── incidents.csv        # Generated dataset
-│   ├── rf_model.joblib      # Trained RandomForest model
+├── data/
+│   ├── generate_dataset.py    # Creates incidents.csv (3,000 rows)
+│   ├── train_model.py         # Trains RF + SHAP, saves artefacts
+│   ├── db.py                  # SQLite helper — connection, CRUD
+│   ├── create_tables.py       # Creates the 4 DB tables
+│   ├── hitl_cdt.db            # Live SQLite database
+│   ├── incidents.csv          # Generated dataset
+│   ├── rf_model.joblib        # Trained RandomForest model
 │   ├── feature_encoder.joblib # OrdinalEncoder for categoricals
-│   ├── label_encoder.joblib # LabelEncoder for target classes
-│   ├── feature_names.json   # Ordered feature column names
-│   ├── confusion_matrix.png # Model evaluation plot
-│   ├── shap_summary.png     # Global SHAP beeswarm (escalate class)
-│   └── shap_waterfall.png   # Single-incident waterfall
+│   ├── label_encoder.joblib   # LabelEncoder for target classes
+│   ├── feature_names.json     # Ordered feature column names
+│   ├── confusion_matrix.png   # Model evaluation plot
+│   ├── shap_summary.png       # Global SHAP beeswarm (escalate class)
+│   └── shap_waterfall.png     # Single-incident waterfall
 ├── config/
-│   ├── routing_config.yaml  # Thresholds, SLA boost, service URLs
-│   └── cost_model.yaml      # Asymmetric operational cost values
+│   ├── routing_config.yaml    # Thresholds, SLA boost, service URLs
+│   └── cost_model.yaml        # Asymmetric operational cost values
 ├── services/
-│   ├── ml-service/          # FastAPI :8001
-│   │   ├── main.py          # 519 lines — predict + SHAP endpoints
+│   ├── ml-service/            # FastAPI :8001
+│   │   ├── main.py
 │   │   └── requirements.txt
-│   ├── twin-service/        # FastAPI :8002
-│   │   ├── main.py          # 661 lines — state engine + SLA + simulate
+│   ├── twin-service/          # FastAPI :8002
+│   │   ├── main.py
 │   │   └── requirements.txt
-│   └── decision-service/    # FastAPI :8003
-│       ├── main.py          # 938 lines — routing + logging + experiments
+│   └── decision-service/      # FastAPI :8003
+│       ├── main.py
 │       └── requirements.txt
-├── gateway/                 # Node.js Express :4000 (NOT YET BUILT)
-├── frontend/                # React + Vite :5173 (NOT YET BUILT)
-├── CLAUDE.md                # This file
+├── gateway/
+│   ├── index.js               # Express + Socket.io + proxy
+│   └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx            # Root layout + sidebar nav
+│   │   ├── main.tsx
+│   │   ├── index.css
+│   │   ├── components/
+│   │   │   ├── IncidentQueue.tsx
+│   │   │   ├── ShapExplainer.tsx
+│   │   │   ├── DecisionPanel.tsx
+│   │   │   ├── TwinStatePanel.tsx
+│   │   │   ├── AnalyticsDashboard.tsx
+│   │   │   └── ExperimentControl.tsx
+│   │   ├── hooks/
+│   │   │   ├── useApi.ts
+│   │   │   └── useWebSocket.ts
+│   │   └── types/
+│   │       └── index.ts
+│   ├── package.json
+│   └── vite.config.ts
+├── CLAUDE.md
 └── README.md
 ```
 
-## Database Schema (to be created)
+## Database Schema
 ### incidents table
 id (SERIAL PK), incident_id (VARCHAR UNIQUE), anomaly_type (VARCHAR), affected_records_pct (FLOAT),
 data_source (VARCHAR), pipeline_stage (VARCHAR), historical_frequency (VARCHAR),
@@ -125,7 +163,7 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - POST /predict — input: 7 incident features → output: {predicted_class, confidence, class_probabilities}
 - POST /predict/batch — input: list of incidents → output: list of predictions
 - POST /explain/features — input: 7 features + explain_class → output: {shap_values, feature_names, base_value}
-- GET /explain/{incident_id} — output: SHAP explanation (currently placeholder, needs DB)
+- GET /explain/{incident_id} — output: {incident_id, predicted_class, explained_class, base_value, shap_values: number[], feature_names: string[], feature_values: (string|number)[]}
 - GET /explain/global — output: {feature_names, importances}
 - GET /model/info — output: {model_type, n_estimators, classes, feature_names}
 - GET /health — output: {status, model_loaded}
@@ -144,19 +182,42 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - POST /decisions — logs a completed decision record with ground_truth, computes is_correct and cost
 - POST /decisions/{id}/override — records human override, recalculates cost
 - GET /decisions/log?page=1&page_size=20&mode=hitl&run_id=X — paginated decision history
-- GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics
+- GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; by_action may be {} when empty
 - POST /experiment/start — input: {mode, incident_count} → begins new run, resets Twin
 - POST /experiment/stop — ends run, computes final ExperimentResults
 - GET /experiment/results — returns ExperimentResults for last completed run
 - GET /experiment/export?run_id=X — streams decision log as CSV download
 - GET /health — output: {status, experiment_mode, experiment_active, decision_count}
 
+## Gateway Proxy Path Rewriting
+Each service has a different URL prefix, so each proxy uses its own pathRewrite:
+
+| Frontend path | Strips | Forwarded to |
+|---|---|---|
+| /api/predict/*, /api/explain/*, /api/model/* | ^/api | :8001 /predict/…, /explain/…, /model/… |
+| /api/twin/* | ^/api/twin | :8002 /state, /sla, /simulate, /reset |
+| /api/decisions/*, /api/experiment/*, /api/config/*, /api/route/* | ^/api | :8003 /decisions/…, /experiment/…, /route |
+
+Note: /api/twin/* must strip "/api/twin" (not just "/api") because the Twin Service
+endpoints have no /twin prefix — they are /state, /sla, etc.
+
 ## How Services Communicate
 1. Frontend (React) → Gateway (:4000) via HTTP REST + WebSocket
-2. Gateway → proxies to ML/Twin/Decision services
-3. Decision Service (:8003) → ML Service (:8001) via async httpx (POST /predict)
-4. Decision Service (:8003) → Twin Service (:8002) via async httpx (GET /state, POST /state/event)
-5. Decision Service reads config/routing_config.yaml and config/cost_model.yaml on startup
+2. Gateway → proxies to ML/Twin/Decision services (http-proxy-middleware v3)
+3. Gateway → polls Twin Service /state every 5 s, broadcasts via Socket.io to all clients
+4. Decision Service (:8003) → ML Service (:8001) via async httpx (POST /predict)
+5. Decision Service (:8003) → Twin Service (:8002) via async httpx (GET /state, POST /state/event)
+6. Decision Service reads config/routing_config.yaml and config/cost_model.yaml on startup
+
+## Frontend Architecture Notes
+- All 6 panels are always mounted in App.tsx; inactive ones are hidden with `display: none`
+  (not unmounted). This preserves component state — e.g. a running experiment survives
+  navigation to another panel and back.
+- ShapExplainer receives three parallel arrays from GET /explain/{id}:
+  shap_values (number[]), feature_names (string[]), feature_values ((string|number)[]).
+  The component zips them internally into {feature, value, display} objects for the chart.
+- AnalyticsDashboard guards against stats.by_action being undefined/null (empty experiment)
+  by defaulting to {} before calling Object.entries().
 
 ## Important Notes for Claude Code
 - I am a beginner. Please write complete files with detailed comments explaining each part.
@@ -166,5 +227,3 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - If you encounter an error, explain what it means in plain English before fixing it.
 - For Python services, always include the FastAPI /docs endpoint reminder.
 - For React components, use TypeScript, Tailwind CSS, and functional components with hooks.
-- The services currently use in-memory storage. The database setup is the next step.
-- When building the database layer, consider using SQLite as a simpler alternative to PostgreSQL if there are setup issues.

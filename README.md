@@ -70,9 +70,12 @@ Three experimental modes are compared:
 
 ```
 hitl-cdt/
-├── data/                           # Dataset generation + ML training
+├── data/
 │   ├── generate_dataset.py         # Creates 3,000 synthetic incidents
 │   ├── train_model.py              # Trains RandomForest + SHAP
+│   ├── db.py                       # SQLite connection helper + CRUD
+│   ├── create_tables.py            # Creates the 4 database tables
+│   ├── hitl_cdt.db                 # Live SQLite database
 │   ├── incidents.csv               # Generated dataset (60/30/10 split)
 │   ├── rf_model.joblib             # Trained model artefact
 │   ├── feature_encoder.joblib      # OrdinalEncoder for categorical features
@@ -94,8 +97,25 @@ hitl-cdt/
 │   └── decision-service/           # Python FastAPI — Port 8003
 │       ├── main.py                 # Routing logic + decision logging + experiments
 │       └── requirements.txt
-├── gateway/                        # Node.js Express — Port 4000 (Phase 3)
-├── frontend/                       # React + TypeScript — Port 5173 (Phase 3)
+├── gateway/
+│   ├── index.js                    # Express + Socket.io + per-service proxy
+│   └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx                 # Root layout, sidebar, panel management
+│   │   ├── components/
+│   │   │   ├── IncidentQueue.tsx   # Incident list with status badges
+│   │   │   ├── ShapExplainer.tsx   # SHAP horizontal bar chart
+│   │   │   ├── DecisionPanel.tsx   # AI recommendation + human override
+│   │   │   ├── TwinStatePanel.tsx  # Live pipeline state gauges
+│   │   │   ├── AnalyticsDashboard.tsx  # Accuracy/cost/override charts
+│   │   │   └── ExperimentControl.tsx   # Mode selector, start/stop, results
+│   │   ├── hooks/
+│   │   │   ├── useApi.ts           # Typed fetch wrapper
+│   │   │   └── useWebSocket.ts     # Socket.io twin state subscription
+│   │   └── types/index.ts          # TypeScript interfaces for all API shapes
+│   ├── package.json
+│   └── vite.config.ts
 ├── CLAUDE.md                       # AI assistant context file
 └── README.md                       # This file
 ```
@@ -117,15 +137,21 @@ hitl-cdt/
 - [x] ML Service (:8001) — predict, batch predict, SHAP explain, global importance
 - [x] Twin Service (:8002) — state tracking, SLA countdown, what-if simulation, history
 - [x] Decision Service (:8003) — 3-mode routing, decision logging, overrides, experiment lifecycle, CSV export
-- [ ] Database setup (PostgreSQL / SQLite)
+- [x] Database — SQLite (`data/hitl_cdt.db`), 4 tables: incidents, decisions, twin_snapshots, experiment_runs
 
-### ⬜ Phase 3 — Gateway + Frontend (Upcoming)
-- [ ] Node.js API Gateway with Socket.io
-- [ ] React dashboard (IncidentQueue, ShapExplainer, DecisionPanel, TwinStatePanel, AnalyticsDashboard, ExperimentControl)
+### ✅ Phase 3 — Gateway + Frontend (Complete)
+- [x] Node.js API Gateway (:4000) — Express, Socket.io, per-service path-rewriting proxy
+- [x] React dashboard (:5173) — all 6 panels, persistent state across navigation
+- [x] IncidentQueue — live incident list with status badges and selection
+- [x] ShapExplainer — SHAP horizontal bar chart + feature table
+- [x] DecisionPanel — AI recommendation display + human override form
+- [x] TwinStatePanel — real-time pipeline gauges via WebSocket
+- [x] AnalyticsDashboard — accuracy, cost, and override charts (Recharts)
+- [x] ExperimentControl — mode selector, start/stop controls, results summary
 
-### ⬜ Phase 4 — Integration + Experiments (Upcoming)
-- [ ] End-to-end testing
-- [ ] Run AI-only / Human-only / HITL experiments
+### 🔄 Phase 4 — Experiments + Thesis Write-up (In Progress)
+- [ ] Run AI-only / Human-only / HITL experiments with study participants
+- [ ] Collect subjective trust ratings (Likert scale)
 - [ ] Data analysis and thesis Chapter 6
 
 ---
@@ -134,51 +160,55 @@ hitl-cdt/
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 20+ (for gateway/frontend — Phase 3)
-- PostgreSQL 16 or SQLite (for decision persistence)
+- Node.js 20+
 
-### 1. Generate the dataset
+### 1. Generate the dataset (first time only)
 ```bash
-cd hitl-cdt
-python data/generate_dataset.py
-# → Creates data/incidents.csv (3,000 rows)
+python data/generate_dataset.py   # → data/incidents.csv
+python data/train_model.py        # → rf_model.joblib + SHAP plots
+python data/create_tables.py      # → data/hitl_cdt.db
 ```
 
-### 2. Train the ML model
+### 2. Start the Python services (3 terminals)
 ```bash
-python data/train_model.py
-# → Creates rf_model.joblib, feature_encoder.joblib, label_encoder.joblib
-# → Generates SHAP plots (shap_summary.png, shap_waterfall.png)
+# Terminal 1 — ML Service
+cd services/ml-service && uvicorn main:app --port 8001 --reload
+
+# Terminal 2 — Twin Service
+cd services/twin-service && uvicorn main:app --port 8002 --reload
+
+# Terminal 3 — Decision Service
+cd services/decision-service && uvicorn main:app --port 8003 --reload
 ```
 
-### 3. Start the services
-Open three terminals:
-
+### 3. Start the gateway
 ```bash
-# Terminal 1: ML Service
-cd services/ml-service
-pip install -r requirements.txt
-uvicorn main:app --port 8001 --reload
-
-# Terminal 2: Twin Service
-cd services/twin-service
-pip install -r requirements.txt
-uvicorn main:app --port 8002 --reload
-
-# Terminal 3: Decision Service
-cd services/decision-service
-pip install -r requirements.txt
-uvicorn main:app --port 8003 --reload
+cd gateway && node index.js
+# → http://localhost:4000
 ```
 
-### 4. Test via Swagger UI
-- ML Service docs: http://localhost:8001/docs
-- Twin Service docs: http://localhost:8002/docs
-- Decision Service docs: http://localhost:8003/docs
-
-### 5. Test the full routing chain
+### 4. Start the frontend
 ```bash
-curl -X POST http://localhost:8003/route \
+cd frontend && npm install && npm run dev
+# → http://localhost:5173
+```
+
+### 5. Verify everything is running
+```bash
+curl http://localhost:4000/health       # gateway
+curl http://localhost:8001/health       # ML service
+curl http://localhost:8002/health       # twin service
+curl http://localhost:8003/health       # decision service
+```
+
+### Swagger UI (service-level API docs)
+- ML Service: http://localhost:8001/docs
+- Twin Service: http://localhost:8002/docs
+- Decision Service: http://localhost:8003/docs
+
+### Test the full routing chain
+```bash
+curl -X POST http://localhost:4000/api/route \
   -H "Content-Type: application/json" \
   -d '{
     "anomaly_type": "schema_mismatch",
