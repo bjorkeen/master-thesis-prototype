@@ -27,6 +27,7 @@ export interface Incident {
 
 // ---------------------------------------------------------------------------
 // Decision — one routing decision (AI recommendation + optional human action)
+// Returned by GET /api/decisions/log
 // ---------------------------------------------------------------------------
 export interface Decision {
   decision_id: string;
@@ -35,7 +36,7 @@ export interface Decision {
   experiment_mode: 'ai_only' | 'human_only' | 'hitl';
   ai_recommendation: 'auto_resolve' | 'escalate' | 'critical';
   ai_confidence: number;             // 0–1
-  routing_action: 'auto_resolve' | 'send_to_human' | 'critical_alert';
+  routing_action: 'auto_resolve' | 'escalate' | 'critical';
   human_action?: string | null;
   human_override_to?: string | null;
   override_reason?: string | null;
@@ -73,7 +74,8 @@ export interface SlaStatus {
 // ---------------------------------------------------------------------------
 // ShapExplanation — feature-level explanation for one incident
 //
-// The ML Service returns three parallel arrays; the component zips them.
+// GET /api/explain/{incident_id} returns three parallel arrays.
+// The ShapExplainer component zips them into {feature, value, display} objects.
 // ---------------------------------------------------------------------------
 export interface ShapExplanation {
   incident_id: string;
@@ -86,47 +88,56 @@ export interface ShapExplanation {
 }
 
 // ---------------------------------------------------------------------------
-// ExperimentResults — summary returned after /experiment/stop
+// ExperimentResults — summary returned by GET /api/experiment/results
+// and embedded in the POST /api/experiment/stop response
 // ---------------------------------------------------------------------------
 export interface ExperimentResults {
   run_id: string;
   mode: 'ai_only' | 'human_only' | 'hitl';
   total_incidents: number;
+  correct_decisions: number;
   accuracy: number;
   total_cost: number;
+  avg_cost_per_incident: number;
   avg_resolution_time_s?: number | null;
   override_count: number;
   override_rate: number;
   started_at: string;
   completed_at?: string | null;
+  cost_breakdown: Record<string, { count: number; total_cost: number }>;
 }
 
 // ---------------------------------------------------------------------------
-// Decision stats — returned by GET /decisions/stats
+// DecisionStats — returned by GET /api/decisions/stats
+//
+// cost_breakdown is keyed by final_action (e.g. "auto_resolve", "escalate",
+// "critical") and each entry holds the count and summed cost for that action.
 // ---------------------------------------------------------------------------
 export interface DecisionStats {
   run_id?: string;
+  experiment_mode?: string;
   total_decisions: number;
   correct_decisions: number;
   accuracy: number;
   total_cost: number;
+  avg_cost_per_incident: number;
   avg_resolution_time_s?: number | null;
   override_count: number;
   override_rate: number;
-  by_action: Record<string, number>;  // e.g. { auto_resolve: 12, escalate: 5 }
+  cost_breakdown: Record<string, { count: number; total_cost: number }>;
 }
 
 // ---------------------------------------------------------------------------
-// Routing response — returned by POST /decisions/route (via Decision Service)
+// RoutingResponse — returned by POST /api/route (Decision Service)
 // ---------------------------------------------------------------------------
 export interface RoutingResponse {
-  decision_id: string;
   incident_id: string;
-  routing_action: 'auto_resolve' | 'send_to_human' | 'critical_alert';
+  routing_decision: 'auto_resolve' | 'escalate' | 'critical';
   ai_recommendation: 'auto_resolve' | 'escalate' | 'critical';
-  ai_confidence: number;
-  confidence_threshold_used: number;
-  explanation: string;
-  shap?: ShapExplanation;
-  sla_risk?: 'green' | 'yellow' | 'red';
+  ai_confidence: number;             // 0–1
+  class_probabilities: Record<string, number>;  // e.g. { auto_resolve: 0.15, escalate: 0.72, critical: 0.13 }
+  experiment_mode: string;
+  thresholds_used: Record<string, number>;       // e.g. { auto_resolve: 0.85, critical: 0.50 }
+  twin_context: TwinState;           // pipeline state snapshot at time of routing
+  explanation: string;               // plain-English reason for the decision
 }

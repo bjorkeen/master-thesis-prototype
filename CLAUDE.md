@@ -17,7 +17,7 @@ Three experimental modes are compared: AI-only, Human-only, and HITL (collaborat
 - **ML Service**: Python FastAPI on port 8001 (scikit-learn RandomForest + SHAP)
 - **Twin Service**: Python FastAPI on port 8002 (pipeline state engine)
 - **Decision Service**: Python FastAPI on port 8003 (routing logic + decision logging)
-- **Database**: SQLite (`data/hitl_cdt.db`) via `data/db.py` + `data/create_tables.py`
+- **Storage**: In-memory (per service process) for prototype evaluation; SQLite schema ready at `data/hitl_cdt.db` via `data/db.py` + `data/create_tables.py` for production use
 
 ## Current Build Status
 ALL PHASES COMPLETE.
@@ -39,9 +39,9 @@ ALL PHASES COMPLETE.
 - services/decision-service/main.py — FastAPI :8003, ~937 lines
 
 ### Phase 3 — Database + Gateway + Frontend
-- data/db.py — SQLite connection helper, table definitions, CRUD functions
+- data/db.py — SQLite connection helper, table definitions, CRUD functions (schema ready; services use in-memory storage during experiments)
 - data/create_tables.py — creates the 4 tables (incidents, decisions, twin_snapshots, experiment_runs)
-- data/hitl_cdt.db — live SQLite database file
+- data/hitl_cdt.db — SQLite database file (schema defined; not used by services at runtime — in-memory storage is sufficient for the fixed-batch experimental protocol)
 - gateway/index.js — Node.js Express :4000, http-proxy-middleware v3, Socket.io WebSocket
 - frontend/src/App.tsx — root layout, sidebar nav, WebSocket hook, all panels always mounted
 - frontend/src/components/IncidentQueue.tsx — incident list, status badges, select for explanation
@@ -182,11 +182,12 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - POST /decisions — logs a completed decision record with ground_truth, computes is_correct and cost
 - POST /decisions/{id}/override — records human override, recalculates cost
 - GET /decisions/log?page=1&page_size=20&mode=hitl&run_id=X — paginated decision history
-- GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; by_action may be {} when empty
+- GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; returns cost_breakdown (not by_action)
 - POST /experiment/start — input: {mode, incident_count} → begins new run, resets Twin
 - POST /experiment/stop — ends run, computes final ExperimentResults
 - GET /experiment/results — returns ExperimentResults for last completed run
 - GET /experiment/export?run_id=X — streams decision log as CSV download
+- GET /incidents/sample?count=300 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); returns [{7 features + ground_truth}]
 - GET /health — output: {status, experiment_mode, experiment_active, decision_count}
 
 ## Gateway Proxy Path Rewriting
@@ -216,8 +217,19 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
 - ShapExplainer receives three parallel arrays from GET /explain/{id}:
   shap_values (number[]), feature_names (string[]), feature_values ((string|number)[]).
   The component zips them internally into {feature, value, display} objects for the chart.
-- AnalyticsDashboard guards against stats.by_action being undefined/null (empty experiment)
-  by defaulting to {} before calling Object.entries().
+- AnalyticsDashboard reads stats.cost_breakdown (not by_action) for the decision
+  distribution chart. cost_breakdown is keyed by action with {count, total_cost} per entry.
+- ExperimentControl includes a batch incident runner: after starting an experiment, the
+  user clicks "Load & Run Incidents" to fetch a stratified sample via GET /incidents/sample,
+  then process each through /route + /decisions sequentially with a configurable delay.
+  In HITL mode, auto_resolve decisions are logged immediately; escalate/critical are counted
+  as pending for human review. IncidentQueue polls every 5s to stay current.
+- TypeScript types in src/types/index.ts match the actual API response shapes:
+  - RoutingResponse uses routing_decision (not routing_action), class_probabilities,
+    thresholds_used, twin_context, experiment_mode
+  - DecisionStats uses cost_breakdown: Record<string, {count, total_cost}> (not by_action)
+  - Decision.routing_action uses 'auto_resolve'|'escalate'|'critical' (not send_to_human/critical_alert)
+  - ExperimentResults includes correct_decisions, avg_cost_per_incident, cost_breakdown
 
 ## Important Notes for Claude Code
 - I am a beginner. Please write complete files with detailed comments explaining each part.

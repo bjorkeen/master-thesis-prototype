@@ -32,6 +32,7 @@ IMPORTANT: ML Service (:8001) and Twin Service (:8002) must be running first.
 # ── Imports ───────────────────────────────────────────────────────────────────
 import csv
 import io
+import random
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -910,6 +911,79 @@ async def export_decisions(run_id: Optional[str] = Query(None)):
     )
 
 
+# ── /incidents ────────────────────────────────────────────────────────────────
+
+@app.get("/incidents/sample", tags=["Incidents"])
+async def sample_incidents(
+    count: int = Query(300, ge=1, le=3000, description="Number of incidents to sample"),
+):
+    """
+    Return a stratified random sample from the incident dataset.
+
+    Reads data/incidents.csv and samples `count` rows while preserving the
+    original 60 / 30 / 10 class distribution (auto_resolve / escalate / critical).
+
+    Each returned incident contains the 7 feature fields plus ground_truth,
+    ready to be POSTed to /route.
+    """
+    csv_path = PROJECT_ROOT / "data" / "incidents.csv"
+
+    if not csv_path.exists():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"Dataset not found at {csv_path}. Run data/generate_dataset.py first.",
+        )
+
+    # ── Read all rows ──────────────────────────────────────────────────────────
+    all_rows: List[dict] = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            all_rows.append(row)
+
+    total = len(all_rows)
+    if total == 0:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Dataset is empty.")
+
+    # ── Stratified sample: keep the same per-class proportions ────────────────
+    by_label: Dict[str, List[dict]] = {}
+    for row in all_rows:
+        label = row.get("label", "unknown")
+        by_label.setdefault(label, []).append(row)
+
+    sampled: List[dict] = []
+    for label, rows in by_label.items():
+        # How many from this class, proportional to requested count
+        n = round(count * len(rows) / total)
+        n = min(n, len(rows))   # can't exceed what's available
+        sampled.extend(random.sample(rows, n))
+
+    # Due to rounding, sampled may be slightly short — top up from the largest class
+    while len(sampled) < count:
+        largest = max(by_label, key=lambda lbl: len(by_label[lbl]))
+        pool = [r for r in by_label[largest] if r not in sampled]
+        if not pool:
+            break
+        sampled.append(random.choice(pool))
+
+    random.shuffle(sampled)
+
+    # ── Build response: 7 features + ground_truth only ────────────────────────
+    FEATURE_COLS = [
+        "anomaly_type", "affected_records_pct", "data_source",
+        "pipeline_stage", "historical_frequency", "time_sensitivity",
+        "data_domain",
+    ]
+
+    result = []
+    for row in sampled[:count]:
+        incident: Dict[str, Any] = {col: row[col] for col in FEATURE_COLS}
+        incident["affected_records_pct"] = float(incident["affected_records_pct"])
+        incident["ground_truth"] = row["label"]
+        result.append(incident)
+
+    return {"count": len(result), "incidents": result}
+
+
 # ── Root ───────────────────────────────────────────────────────────────────────
 
 @app.get("/", tags=["Info"])
@@ -932,6 +1006,7 @@ async def root():
             "POST /experiment/stop":         "End experiment and compute results",
             "GET  /experiment/results":      "Final experiment metrics",
             "GET  /experiment/export":       "Download decision log as CSV",
+            "GET  /incidents/sample":        "Stratified sample from the dataset",
             "GET  /docs":                    "Swagger UI",
         },
     }

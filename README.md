@@ -59,10 +59,17 @@ Three experimental modes are compared:
         └──────────────────┴──────────────────┘
                            │
                     ┌──────┴──────┐
+                    │  SQLite /   │
                     │ PostgreSQL  │
-                    │   :5432     │
                     └─────────────┘
 ```
+
+> **Note:** The prototype uses in-memory storage within each service for
+> experimental sessions. The database schema is implemented
+> (`data/create_tables.py`) and ready for production persistence, but
+> in-memory operation is sufficient for the controlled experimental protocol
+> where each session processes a fixed batch of incidents without service
+> interruption.
 
 ---
 
@@ -137,7 +144,7 @@ hitl-cdt/
 - [x] ML Service (:8001) — predict, batch predict, SHAP explain, global importance
 - [x] Twin Service (:8002) — state tracking, SLA countdown, what-if simulation, history
 - [x] Decision Service (:8003) — 3-mode routing, decision logging, overrides, experiment lifecycle, CSV export
-- [x] Database — SQLite (`data/hitl_cdt.db`), 4 tables: incidents, decisions, twin_snapshots, experiment_runs
+- [x] Database schema defined (SQLite with PostgreSQL fallback) — services currently use in-memory storage for prototype evaluation
 
 ### ✅ Phase 3 — Gateway + Frontend (Complete)
 - [x] Node.js API Gateway (:4000) — Express, Socket.io, per-service path-rewriting proxy

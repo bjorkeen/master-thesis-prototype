@@ -74,12 +74,19 @@ export function IncidentQueue({ onSelect }: Props) {
   const [error,      setError]      = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 50 })
+  function fetchEntries() {
+    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 200 })
       .then(r => setEntries(Array.isArray(r) ? r : (r as LogResponse).decisions ?? []))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [get]);
+  }
+
+  // Initial load + poll every 5 s so the queue stays fresh during a batch run
+  useEffect(() => {
+    fetchEntries();
+    const id = setInterval(fetchEntries, 5000);
+    return () => clearInterval(id);
+  }, [get]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const escalated = entries.filter(e => e.ai_recommendation === 'escalate').length;
   const mode      = entries[0]?.experiment_mode;

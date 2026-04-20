@@ -76,11 +76,11 @@ export function AnalyticsDashboard() {
       .finally(() => setLoading(false));
   }, [get]);
 
-  // Chart 1: count of decisions per action type (from stats.by_action)
-  // Guard: by_action may be undefined/null when no decisions exist yet
+  // Chart 1: count of decisions per action type (from stats.cost_breakdown)
+  // Guard: cost_breakdown may be undefined/null when no decisions exist yet
   const actionData = stats
-    ? Object.entries(stats.by_action ?? {}).map(([action, count]) => ({
-        action: ACTION_LABEL[action] ?? action, count,
+    ? Object.entries(stats.cost_breakdown ?? {}).map(([action, data]) => ({
+        action: ACTION_LABEL[action] ?? action, count: data.count,
         color: ACTION_COLOR[action] ?? '#4C8BF5',
       }))
     : [];
