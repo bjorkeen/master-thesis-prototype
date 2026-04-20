@@ -28,6 +28,10 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
     console.error('[api]', error.config?.url, error.response?.status, error.message);
+    const detail = error?.response?.data?.detail;
+    if (typeof detail === 'string' && detail.trim().length > 0) {
+      return Promise.reject(new Error(detail));
+    }
     return Promise.reject(error);
   }
 );

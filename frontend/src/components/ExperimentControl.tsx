@@ -41,7 +41,7 @@ interface SampledIncident {
 }
 
 const B = '#2A2B38';
-const PROTOCOL_INCIDENT_COUNT = 300;
+const PROTOCOL_INCIDENT_COUNT = 100;
 const PROTOCOL_SAMPLE_SEED = 42;
 
 const MODES: { key: ExperimentMode; label: string; color: string; desc: string }[] = [

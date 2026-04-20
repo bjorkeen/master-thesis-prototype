@@ -3,7 +3,7 @@
  * Data: GET /api/decisions/log → Decision Service :8003
  * Props: onSelect(incidentId) — called when a row is clicked.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import type { Decision, DecisionStats } from '../types';
@@ -88,13 +88,13 @@ function ReviewedBadge() {
   );
 }
 
-// Small coloured pill for the AI recommendation (used for decided/auto-resolved rows)
+// Small coloured pill — used for routing column and for decided rows (AI recommendation)
 function Badge({ value }: { value: string }) {
   const c = COLOR[value] ?? '#4C8BF5';
   return (
     <span style={{ color: c, borderColor: c, backgroundColor: `${c}22` }}
-      className="px-2 py-0.5 rounded text-xs font-medium border whitespace-nowrap">
-      {LABEL[value] ?? value}
+      className="px-2 py-0.5 rounded text-xs font-semibold border whitespace-nowrap">
+      {LABEL[value] ?? value.replace(/_/g, ' ')}
     </span>
   );
 }
@@ -116,6 +116,79 @@ function feat(entry: LogEntry, key: keyof IncidentFeatures): string | number | u
     ?? entry.incident_features?.[key];
 }
 
+/** Column keys used for client-side sorting (null = dot column, not sortable). */
+type SortColumn =
+  | 'incident_id'
+  | 'anomaly'
+  | 'affected'
+  | 'source'
+  | 'stage'
+  | 'confidence'
+  | 'routing'
+  | 'status';
+
+const ROUTING_ORDER: Record<string, number> = {
+  auto_resolve: 0,
+  escalate: 1,
+  critical: 2,
+};
+
+/** Lower = appears first when sortDir === 'asc'. */
+function statusSortKey(entry: LogEntry): number {
+  if (isPending(entry)) return 0;
+  if (entry.experiment_mode === 'human_only') return 1;
+  return 2;
+}
+
+function compareEntries(a: LogEntry, b: LogEntry, col: SortColumn, dir: 'asc' | 'desc'): number {
+  const inv = dir === 'asc' ? 1 : -1;
+  const tie = (a.decision_id ?? '').localeCompare(b.decision_id ?? '');
+
+  const str = (v: string | number | undefined) =>
+    (v === undefined || v === null ? '' : String(v)).toLowerCase();
+
+  let cmp = 0;
+  switch (col) {
+    case 'incident_id':
+      cmp = a.incident_id.localeCompare(b.incident_id);
+      break;
+    case 'anomaly':
+      cmp = str(feat(a, 'anomaly_type')).localeCompare(str(feat(b, 'anomaly_type')));
+      break;
+    case 'affected': {
+      const na = Number(feat(a, 'affected_records_pct'));
+      const nb = Number(feat(b, 'affected_records_pct'));
+      cmp = (Number.isFinite(na) ? na : -1) - (Number.isFinite(nb) ? nb : -1);
+      break;
+    }
+    case 'source':
+      cmp = str(feat(a, 'data_source')).localeCompare(str(feat(b, 'data_source')));
+      break;
+    case 'stage':
+      cmp = str(feat(a, 'pipeline_stage')).localeCompare(str(feat(b, 'pipeline_stage')));
+      break;
+    case 'confidence': {
+      const ca = a.experiment_mode === 'human_only' || a.ai_confidence == null ? -1 : a.ai_confidence;
+      const cb = b.experiment_mode === 'human_only' || b.ai_confidence == null ? -1 : b.ai_confidence;
+      cmp = ca - cb;
+      break;
+    }
+    case 'routing': {
+      const ra = ROUTING_ORDER[a.routing_action] ?? 99;
+      const rb = ROUTING_ORDER[b.routing_action] ?? 99;
+      cmp = ra - rb;
+      break;
+    }
+    case 'status':
+      cmp = statusSortKey(a) - statusSortKey(b);
+      break;
+    default:
+      cmp = 0;
+  }
+  if (cmp !== 0) return cmp * inv;
+  return tie;
+}
+
 // ---- component ----
 export function IncidentQueue({ onSelect }: Props) {
   const { get } = useApi();
@@ -124,6 +197,8 @@ export function IncidentQueue({ onSelect }: Props) {
   const [error,      setError]      = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
+  const [sortDir,    setSortDir]    = useState<'asc' | 'desc'>('asc');
 
   function fetchEntries(showSpinner = false) {
     if (showSpinner) setRefreshing(true);
@@ -155,6 +230,19 @@ export function IncidentQueue({ onSelect }: Props) {
 
   const pendingCount = entries.filter(isPending).length;
   const mode         = entries[0]?.experiment_mode;
+
+  const sortedEntries = useMemo(() => {
+    if (!sortColumn) return entries;
+    return [...entries].sort((a, b) => compareEntries(a, b, sortColumn, sortDir));
+  }, [entries, sortColumn, sortDir]);
+
+  function toggleSort(col: SortColumn) {
+    if (sortColumn === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSortColumn(col);
+      setSortDir('asc');
+    }
+  }
 
   function select(entry: LogEntry) {
     setSelectedId(entry.incident_id);
@@ -213,21 +301,48 @@ export function IncidentQueue({ onSelect }: Props) {
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10" style={{ backgroundColor: '#16171E' }}>
               <tr>
-                {['', 'Incident ID', 'Anomaly', 'Affected %', 'Source', 'Stage', 'Confidence', 'Status'].map((h, i) => (
-                  <th key={i}
-                    className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide whitespace-nowrap border-b"
-                    style={{ color: '#6B7A99', borderColor: B }}>
-                    {h}
+                {(
+                  [
+                    { col: null as SortColumn | null, label: '' },
+                    { col: 'incident_id', label: 'Incident ID' },
+                    { col: 'anomaly', label: 'Anomaly' },
+                    { col: 'affected', label: 'Affected %' },
+                    { col: 'source', label: 'Source' },
+                    { col: 'stage', label: 'Stage' },
+                    { col: 'confidence', label: 'Confidence' },
+                    { col: 'routing', label: 'Routing' },
+                    { col: 'status', label: 'Status' },
+                  ] as const
+                ).map(({ col, label }) => (
+                  <th
+                    key={label || 'dot'}
+                    className={`px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide whitespace-nowrap border-b ${
+                      col ? 'cursor-pointer select-none hover:brightness-125' : ''
+                    }`}
+                    style={{
+                      color: col && sortColumn === col ? '#4C8BF5' : '#6B7A99',
+                      borderColor: B,
+                    }}
+                    onClick={col ? () => toggleSort(col) : undefined}
+                    title={col ? `Sort by ${label}` : undefined}
+                  >
+                    {label}
+                    {col && sortColumn === col && (
+                      <span className="ml-1 tabular-nums" aria-hidden>
+                        {sortDir === 'asc' ? '↑' : '↓'}
+                      </span>
+                    )}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {entries.map(entry => {
+              {sortedEntries.map(entry => {
                 const pending = isPending(entry);
                 const humanOnly = entry.experiment_mode === 'human_only';
                 const sel     = selectedId === entry.incident_id;
                 const tc      = { borderColor: B };
+                const routing = entry.routing_action;
 
                 // Feature values — top-level (flattened) with nested fallback
                 const anomalyType       = feat(entry, 'anomaly_type') as string | undefined;
@@ -242,7 +357,7 @@ export function IncidentQueue({ onSelect }: Props) {
                       backgroundColor: sel
                         ? 'rgba(76,139,245,0.15)'
                         : pending
-                        ? 'rgba(232,145,58,0.05)'   // subtle amber tint for pending rows
+                        ? (TINT[routing] ?? 'rgba(232,145,58,0.05)')
                         : humanOnly
                         ? 'rgba(107,112,128,0.05)'
                         : TINT[entry.ai_recommendation],
@@ -250,15 +365,22 @@ export function IncidentQueue({ onSelect }: Props) {
                       outlineOffset: '-1px',
                     }}>
 
-                    {/* Severity dot — amber for pending, else action colour */}
+                    {/* Severity dot — pending: colour by routing_action; else AI recommendation / neutral */}
                     <td className="px-3 py-2.5 border-b w-8" style={tc}>
-                      <span className="block w-2 h-2 rounded-full" style={{
-                        backgroundColor: pending
-                          ? '#E8913A'
-                          : humanOnly
-                          ? '#6B7080'
-                          : (COLOR[entry.ai_recommendation] ?? '#6B7080'),
-                      }} />
+                      <span
+                        className="block w-2 h-2 rounded-full"
+                        style={{
+                          backgroundColor: pending
+                            ? (COLOR[routing] ?? '#E8913A')
+                            : humanOnly
+                              ? '#6B7080'
+                              : (COLOR[entry.ai_recommendation] ?? '#6B7080'),
+                          boxShadow:
+                            pending && routing === 'critical'
+                              ? '0 0 6px rgba(229,83,75,0.85)'
+                              : undefined,
+                        }}
+                      />
                     </td>
 
                     {/* Incident ID */}
@@ -291,6 +413,11 @@ export function IncidentQueue({ onSelect }: Props) {
                       {humanOnly ? '—' : `${(entry.ai_confidence * 100).toFixed(0)}%`}
                     </td>
 
+                    {/* Routing (system route — distinguishes escalate vs critical while pending) */}
+                    <td className="px-3 py-2.5 border-b" style={tc}>
+                      <Badge value={routing} />
+                    </td>
+
                     {/* Status badge — PENDING or action badge */}
                     <td className="px-3 py-2.5 border-b" style={tc}>
                       {pending
@@ -311,7 +438,14 @@ export function IncidentQueue({ onSelect }: Props) {
       {entries.length > 0 && (
         <div className="px-6 py-2 text-xs border-t flex items-center gap-3 flex-shrink-0"
           style={{ color: '#6B7A99', borderColor: B, backgroundColor: '#16171E' }}>
-          <span>{entries.length} decision{entries.length !== 1 ? 's' : ''}</span>
+          <span>
+            {entries.length} decision{entries.length !== 1 ? 's' : ''}
+            {sortColumn && (
+              <span className="ml-2" style={{ color: '#4C8BF5' }}>
+                (sorted by {sortColumn.replace(/_/g, ' ')} {sortDir})
+              </span>
+            )}
+          </span>
           {pendingCount > 0 && (
             <span style={{ color: '#E8913A' }}>{pendingCount} pending review</span>
           )}

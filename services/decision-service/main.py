@@ -32,6 +32,7 @@ IMPORTANT: ML Service (:8001) and Twin Service (:8002) must be running first.
 # ── Imports ───────────────────────────────────────────────────────────────────
 import csv
 import io
+import os
 import random
 import uuid
 from datetime import datetime, timezone
@@ -576,7 +577,8 @@ async def route_incident(features: IncidentFeatures):
       1.  Call ML Service → get AI prediction + confidence
       2.  Call Twin Service → get current pipeline state (for SLA boost + context)
       3.  Apply routing logic based on experiment mode
-      4.  Notify Twin Service that an incident has arrived (updates its counters)
+      4.  Optionally notify Twin Service of an arrival (ai_only, or HITL auto_resolve
+          only — pending human-review paths do not inflate Twin SLA during batch runs)
       5.  Return routing decision with full context
 
     The frontend uses this to decide what to show the analyst:
@@ -639,19 +641,41 @@ async def route_incident(features: IncidentFeatures):
             thresholds=thresholds,
         )
 
+        # Optional: HITL_CDT_DEBUG_SLA=1 — print SLA / thresholds / confidence per /route call.
+        if os.environ.get("HITL_CDT_DEBUG_SLA", "").strip().lower() in ("1", "true", "yes"):
+            print(
+                f"SLA remaining: {twin_state.get('sla_remaining_s')}, "
+                f"thresholds: {thresholds}, confidence: {ai_confidence}",
+                flush=True,
+            )
+
         # ── Step 4: Notify Twin Service that this incident has arrived ─────
         incident_id = f"INC-{_new_id()}"
-        try:
-            await client.post(
-                f"{TWIN_SERVICE_URL}/state/event",
-                json={
-                    "event_type":  "arrive",
-                    "incident_id": incident_id,
-                    "severity":    routing_decision,
-                },
-            )
-        except Exception:
-            pass   # Twin notification is best-effort; don't block routing
+        # Twin open_incidents drives SLA remaining (see Twin _compute_sla_remaining).
+        # POST /decisions sends resolve for fully closed rows, but HITL/human_only
+        # escalate/critical rows stay pending until an analyst overrides — so if we
+        # always posted arrive here, fast batch runs would stack open incidents and
+        # crush SLA thresholds (e.g. T_auto -> 0.999) before humans act.
+        #
+        # Post arrive only when Twin will see a matching resolve in the same turn
+        # from POST /decisions (non-pending rows), or for ai_only where every row
+        # is logged as resolved immediately after routing.
+        should_notify_twin_arrive = (
+            experiment["mode"] == "ai_only"
+            or routing_decision == "auto_resolve"
+        )
+        if should_notify_twin_arrive:
+            try:
+                await client.post(
+                    f"{TWIN_SERVICE_URL}/state/event",
+                    json={
+                        "event_type":  "arrive",
+                        "incident_id": incident_id,
+                        "severity":    routing_decision,
+                    },
+                )
+            except Exception:
+                pass   # Twin notification is best-effort; don't block routing
 
         # Increment per-run counter
         if experiment["active"]:
@@ -1091,7 +1115,7 @@ async def export_decisions(
 
 @app.get("/incidents/sample", tags=["Incidents"])
 async def sample_incidents(
-    count: int = Query(300, ge=1, le=3000, description="Number of incidents to sample"),
+    count: int = Query(100, ge=1, le=3000, description="Number of incidents to sample"),
     seed: Optional[int] = Query(
         None,
         description="Optional RNG seed for reproducible sampling across runs/participants",

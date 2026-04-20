@@ -178,7 +178,7 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - GET /health — output: {status, snapshot_count}
 
 ### Decision Service (:8003)
-- POST /route — THE MAIN ENDPOINT: takes incident features, calls ML+Twin, returns routing decision with explanation (requires active experiment)
+- POST /route — THE MAIN ENDPOINT: takes incident features, calls ML+Twin, returns routing decision with explanation (requires active experiment). Twin `arrive` is sent only for `ai_only` or when the routed outcome is `auto_resolve`, so HITL escalate/critical backlog does not drain SLA during unattended batch runs.
 - POST /decisions — logs a decision row, computes is_correct/cost (requires active experiment + mode match)
 - POST /decisions/{id}/override — records human decision update for the active run only
 - GET /decisions/log?page=1&page_size=20&mode=hitl&run_id=X — paginated decision history
@@ -187,7 +187,7 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - POST /experiment/stop — ends run, computes final ExperimentResults
 - GET /experiment/results — returns ExperimentResults for last completed run
 - GET /experiment/export?run_id=X — streams decision log as CSV download
-- GET /incidents/sample?count=300&seed=42 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); protocol lock enforces count and seed
+- GET /incidents/sample?count=100&seed=42 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); protocol lock enforces count and seed
 - GET /health — output: {status, experiment_mode, experiment_active, decision_count}
 
 ## Gateway Proxy Path Rewriting

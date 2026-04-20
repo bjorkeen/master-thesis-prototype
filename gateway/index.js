@@ -62,7 +62,14 @@ const twinProxy = createProxyMiddleware({
 const decisionProxy = createProxyMiddleware({
   target: "http://localhost:8003",
   changeOrigin: true,
-  pathFilter: ["/api/decisions/**", "/api/experiment/**", "/api/config/**", "/api/route/**", "/api/incidents/**", "/api/health"],
+  // Use explicit prefix checks instead of glob array matching for reliability.
+  pathFilter: (path) =>
+    path === "/api/health" ||
+    path.startsWith("/api/decisions") ||
+    path.startsWith("/api/experiment") ||
+    path.startsWith("/api/config") ||
+    path.startsWith("/api/route") ||
+    path.startsWith("/api/incidents"),
   pathRewrite: { "^/api": "" },   // /api/incidents/sample → /incidents/sample
 });
 

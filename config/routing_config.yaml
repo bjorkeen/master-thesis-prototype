@@ -64,7 +64,7 @@ default_experiment_mode: "hitl"
 
 # max_incidents_per_experiment: safety limit on dataset size per run.
 # (prevents runaway experiments from consuming all 3,000 incidents at once)
-max_incidents_per_experiment: 300
+max_incidents_per_experiment: 100
 
 # experiment_seed: fixed random seed for reproducible participant/arm sampling.
 experiment_seed: 42

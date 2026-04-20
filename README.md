@@ -42,11 +42,11 @@ Three experimental modes are compared:
 │  IncidentQueue · ShapExplainer · DecisionPanel · TwinState  │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP + WebSocket
-┌──────────────────────────┴──────────────────────────────────┐
-│                 Node.js API Gateway (:4000)                 │
-│              Express + Socket.io + Proxy                    │
-└───────┬──────────────────┬──────────────────┬───────────────┘
-        │                  │                  │
+┌──────────────────────────┴────────────────────────────────┐
+│                 Node.js API Gateway (:4000)               │
+│              Express + Socket.io + Proxy                  │
+└───────┬─────────────────┬─────────────────┬───────────────┘
+        │                 │                 │
    ┌────┴────┐       ┌────┴────┐       ┌────┴────┐
    │ ML Svc  │       │ Twin    │       │Decision │
    │ :8001   │       │ Svc     │       │ Svc     │
@@ -55,8 +55,8 @@ Three experimental modes are compared:
    │ sklearn │       │ State   │       │ Routing │
    │ SHAP    │       │ Engine  │       │ Logging │
    └────┬────┘       └────┬────┘       └────┬────┘
-        │                 │                  │
-        └─────────────────┴──────────────────┘
+        │                 │                 │
+        └─────────────────┴─────────────────┘
                           │
                     ┌─────┴──────┐
                     │  SQLite /  │
@@ -246,7 +246,7 @@ curl -X POST http://localhost:4000/api/route \
 | Base critical threshold | confidence < 0.50 may escalate to critical under class/uncertainty gates | config/routing_config.yaml |
 | Missed critical cost | €100 | config/cost_model.yaml |
 | False escalation cost | €10 | config/cost_model.yaml |
-| Experiment incidents | 300 per run | Thesis §3.4 |
+| Experiment incidents | 100 per run | Thesis §3.4 |
 
 ---
 
