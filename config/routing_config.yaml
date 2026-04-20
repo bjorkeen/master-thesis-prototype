@@ -41,16 +41,20 @@ sla_escalation_boost: true
 # (used in Twin Service to adjust thresholds based on remaining time)
 sla_boost_schedule:
   # Once ≤10 minutes remain, tighten auto_resolve by +10%
-  # (from 0.85 → 0.935) to be extra conservative
+  # (from 0.85 → 0.935) to be extra conservative.
+  # Critical threshold also rises by +5%
+  # (from 0.50 → 0.525).
   minutes_remaining_10:
     auto_resolve_threshold_reduction: 0.10
     critical_threshold_increase: 0.05
 
   # Once ≤5 minutes remain, tighten even more
-  # (0.85 × 1.20 = 1.02, capped to 0.999 in code)
+  # (from 0.85 → capped at 0.999 in code).
+  # Critical threshold also rises by +10%
+  # (from 0.50 → 0.55).
   minutes_remaining_5:
     auto_resolve_threshold_reduction: 0.20
-    critical_threshold_increase: 0.10 # 0.50 → 0.55
+    critical_threshold_increase: 0.10
 
 # ---- Experiment control ----
 
