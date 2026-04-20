@@ -163,7 +163,14 @@ class DecisionResponse(BaseModel):
 
 
 class OverrideRequest(BaseModel):
-    """Body for POST /decisions/{id}/override."""
+    """
+    Body for POST /decisions/{id}/override.
+
+    Contract:
+      - new_action: the analyst's chosen action
+      - override_reason: mandatory free-text rationale
+      - ground_truth: optional true label (if known at override time)
+    """
     new_action:    Literal["auto_resolve", "escalate", "critical"] = Field(...,
         description="The action the human chose instead of the AI's recommendation")
     override_reason: str = Field(..., min_length=1,
@@ -173,6 +180,15 @@ class OverrideRequest(BaseModel):
 
 
 class OverrideResponse(BaseModel):
+    """
+    Response for POST /decisions/{id}/override.
+
+    Contract:
+      - decision_id: updated decision row
+      - old_action/new_action: action transition
+      - override_reason: analyst rationale echoed back
+      - cost_delta: cost(new_action) - cost(old_action)
+    """
     decision_id:   str
     old_action:    str
     new_action:    str
@@ -366,6 +382,50 @@ def _current_run_decisions() -> List[dict]:
     if not run_id:
         return decision_log   # no active run → return everything
     return [d for d in decision_log if d.get("run_id") == run_id]
+
+
+def _flatten_doc(doc: dict) -> dict:
+    """
+    Merge incident_features fields into the top-level dict for JSON responses.
+
+    The raw decision record stores features under a nested 'incident_features'
+    key. This helper spreads them to the top level so the frontend can read
+    anomaly_type, data_source, etc. directly from the log entry, while also
+    keeping incident_features intact for callers that want the original shape.
+    """
+    flat = dict(doc)
+    for k, v in (doc.get("incident_features") or {}).items():
+        flat.setdefault(k, v)   # top-level wins if already present
+    return flat
+
+
+def _is_pending_human_review(doc: dict) -> bool:
+    """
+    Return True when a decision record is waiting for analyst action.
+    """
+    return (
+        doc.get("human_action") is None
+        and doc.get("routing_action") != "auto_resolve"
+        and doc.get("experiment_mode") in {"hitl", "human_only"}
+    )
+
+
+async def _notify_twin_resolved(incident_id: str, severity: str) -> None:
+    """
+    Best-effort Twin notification that one incident is now fully resolved.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{TWIN_SERVICE_URL}/state/event",
+                json={
+                    "event_type": "resolve",
+                    "incident_id": incident_id,
+                    "severity": severity,
+                },
+            )
+    except Exception:
+        pass   # best-effort, don't block API responses
 
 
 def _compute_stats(decisions: List[dict]) -> dict:
@@ -580,12 +640,17 @@ async def log_decision(record: DecisionRecord):
     """
     Log a completed decision to the audit trail.
 
-    Call this after an incident has been fully handled:
-      - In ai_only mode: call immediately after /route
-      - In hitl mode: call after human has reviewed (or after auto-resolve)
+    Call this after /route to persist one decision row.
+
+    Usage by mode:
+      - ai_only: human_action is set (AI is final decision-maker)
+      - hitl/human_only pending review: human_action=None for incidents that
+        still require analyst action
+      - fully resolved rows: human_action/final_action reflect final outcome
 
     Computes is_correct and cost if ground_truth is provided.
-    Also notifies the Twin Service that the incident has been resolved.
+    Notifies Twin Service only for fully resolved rows; pending review rows are
+    resolved later via POST /decisions/{id}/override.
     """
     decision_id = _new_id()
 
@@ -622,19 +687,12 @@ async def log_decision(record: DecisionRecord):
     decision_index[decision_id] = len(decision_log)
     decision_log.append(doc)
 
-    # Notify Twin Service that the incident is resolved
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(
-                f"{TWIN_SERVICE_URL}/state/event",
-                json={
-                    "event_type":  "resolve",
-                    "incident_id": record.incident_id,
-                    "severity":    record.final_action,
-                },
-            )
-    except Exception:
-        pass   # best-effort, don't block logging
+    # Notify Twin only when this record is fully resolved (not pending review).
+    if not _is_pending_human_review(doc):
+        await _notify_twin_resolved(
+            incident_id=record.incident_id,
+            severity=record.final_action,
+        )
 
     return DecisionResponse(
         decision_id=decision_id,
@@ -650,11 +708,16 @@ async def override_decision(decision_id: str, override: OverrideRequest):
     Record a human override of a previously logged decision.
 
     This is called when a human analyst disagrees with the AI routing
-    and takes a different action.  The decision record is updated in-place:
+    and takes a different action (or explicitly accepts it via the same path).
+    The decision record is updated in-place:
+      - human_action       → set to the analyst's chosen action
       - human_override_to  → the action the human chose
       - override_reason    → why they disagreed
       - final_action       → updated to the human's choice
       - is_correct / cost  → recomputed if ground_truth is now known
+
+    If the row was pending human review, this endpoint also marks the incident
+    resolved in Twin Service.
     """
     if decision_id not in decision_index:
         raise HTTPException(
@@ -664,6 +727,7 @@ async def override_decision(decision_id: str, override: OverrideRequest):
 
     idx = decision_index[decision_id]
     doc = decision_log[idx]
+    was_pending = _is_pending_human_review(doc)
 
     old_action = doc["final_action"]
 
@@ -673,6 +737,7 @@ async def override_decision(decision_id: str, override: OverrideRequest):
     old_cost     = doc["cost"] or 0.0
 
     # Update the record in-place
+    doc["human_action"]       = override.new_action
     doc["human_override_to"] = override.new_action
     doc["override_reason"]   = override.override_reason
     doc["final_action"]      = override.new_action
@@ -680,12 +745,37 @@ async def override_decision(decision_id: str, override: OverrideRequest):
     doc["is_correct"]        = (override.new_action == ground_truth) if ground_truth else None
     doc["cost"]              = new_cost
 
+    # If this incident was pending human review, it is now fully resolved.
+    if was_pending:
+        await _notify_twin_resolved(
+            incident_id=doc["incident_id"],
+            severity=doc["final_action"],
+        )
+
     return OverrideResponse(
         decision_id=decision_id,
         old_action=old_action,
         new_action=override.new_action,
         override_reason=override.override_reason,
         cost_delta=round(new_cost - old_cost, 2),
+    )
+
+
+@app.get("/decisions/incident/{incident_id}", tags=["Decisions"])
+async def get_decision_by_incident(incident_id: str):
+    """
+    Return the latest logged decision for one incident_id.
+
+    Used by ML Service (/explain/{incident_id}) to fetch the exact feature set
+    that was routed for this incident, so SHAP explanations are incident-specific.
+    """
+    for doc in reversed(decision_log):
+        if doc.get("incident_id") == incident_id:
+            return _flatten_doc(doc)
+
+    raise HTTPException(
+        status.HTTP_404_NOT_FOUND,
+        f"Incident {incident_id} not found in decision log.",
     )
 
 
@@ -719,7 +809,9 @@ async def get_decision_log(
     total      = len(filtered)
     start      = (page - 1) * page_size
     end        = start + page_size
-    page_data  = filtered[start:end]
+    # Flatten incident_features into each row so the frontend can read
+    # anomaly_type, data_source, etc. as top-level fields.
+    page_data  = [_flatten_doc(d) for d in filtered[start:end]]
 
     return {
         "total":     total,
@@ -1000,6 +1092,7 @@ async def root():
             "POST /route":                   "Route one incident (calls ML + Twin)",
             "POST /decisions":               "Log a completed decision",
             "POST /decisions/{id}/override": "Record a human override",
+            "GET  /decisions/incident/{id}": "Latest decision row for one incident_id",
             "GET  /decisions/log":           "Paginated decision history",
             "GET  /decisions/stats":         "Accuracy, cost, timing metrics",
             "POST /experiment/start":        "Begin a new experiment run",

@@ -48,6 +48,25 @@ export interface Decision {
   decided_at: string;
 }
 
+export type DecisionAction = 'auto_resolve' | 'escalate' | 'critical';
+
+// ---------------------------------------------------------------------------
+// Override contract — POST /api/decisions/{id}/override
+// ---------------------------------------------------------------------------
+export interface OverrideDecisionRequest {
+  new_action: DecisionAction;
+  override_reason: string;
+  ground_truth?: string;
+}
+
+export interface OverrideDecisionResponse {
+  decision_id: string;
+  old_action: DecisionAction;
+  new_action: DecisionAction;
+  override_reason: string;
+  cost_delta?: number | null;
+}
+
 // ---------------------------------------------------------------------------
 // TwinState — the real-time pipeline state from the Digital Twin service
 // ---------------------------------------------------------------------------

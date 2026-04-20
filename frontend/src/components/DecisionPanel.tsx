@@ -1,24 +1,29 @@
 /**
  * DecisionPanel — human analyst action interface.
  *
- * Accept  → POST /api/decisions  (human_action = ai_recommendation)
- * Override→ POST /api/decisions/{id}/override  (new_action + reason)
+ * Accept  → POST /api/decisions/{id}/override  (new_action = ai_recommendation)
+ * Override→ POST /api/decisions/{id}/override  (new_action + override_reason)
  * Dismiss → local only
  */
 import { useEffect, useState } from 'react';
 import { CheckCircle, ArrowLeftRight, XCircle, AlertTriangle } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import type { Decision } from '../types';
+import type {
+  Decision,
+  DecisionAction,
+  OverrideDecisionRequest,
+  OverrideDecisionResponse,
+} from '../types';
 
 interface LogEntry extends Decision { anomaly_type?: string; }
 interface LogResponse { decisions: LogEntry[]; total: number; }
 export interface Props { incidentId: string | null; }
 
 const B = '#2A2B38';
-const REC_COLOR: Record<string, string> = {
+const REC_COLOR: Record<DecisionAction, string> = {
   auto_resolve: '#3EBD8C', escalate: '#E8913A', critical: '#E5534B',
 };
-const REC_LABEL: Record<string, string> = {
+const REC_LABEL: Record<DecisionAction, string> = {
   auto_resolve: 'Auto Resolve', escalate: 'Escalate', critical: 'Critical',
 };
 
@@ -27,10 +32,10 @@ export function DecisionPanel({ incidentId }: Props) {
   const [decision,   setDecision]   = useState<LogEntry | null>(null);
   const [loading,    setLoading]    = useState(false);
   const [showForm,   setShowForm]   = useState(false);
-  const [newAction,  setNewAction]  = useState('escalate');
+  const [newAction,  setNewAction]  = useState<DecisionAction>('escalate');
   const [reason,     setReason]     = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string; cost?: number | null } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string; costDelta?: number | null } | null>(null);
 
   useEffect(() => {
     if (!incidentId) { setDecision(null); setResult(null); setShowForm(false); return; }
@@ -48,10 +53,19 @@ export function DecisionPanel({ incidentId }: Props) {
     if (!decision) return;
     setSubmitting(true);
     try {
-      const res = await post<{ cost?: number | null }>('/api/decisions', {
-        ...decision, human_action: decision.ai_recommendation, final_action: decision.ai_recommendation,
+      const payload: OverrideDecisionRequest = {
+        new_action: decision.ai_recommendation,
+        override_reason: 'Accepted AI recommendation',
+      };
+      const res = await post<OverrideDecisionResponse>(
+        `/api/decisions/${decision.decision_id}/override`,
+        payload,
+      );
+      setResult({
+        ok: true,
+        message: `Accepted: ${REC_LABEL[decision.ai_recommendation]}`,
+        costDelta: res.cost_delta,
       });
-      setResult({ ok: true, message: `Accepted: ${REC_LABEL[decision.ai_recommendation]}`, cost: res.cost });
     } catch (e: unknown) {
       setResult({ ok: false, message: `Error: ${(e as Error).message}` });
     } finally { setSubmitting(false); }
@@ -61,11 +75,19 @@ export function DecisionPanel({ incidentId }: Props) {
     if (!decision || reason.trim().length < 5) return;
     setSubmitting(true);
     try {
-      const res = await post<{ cost?: number | null }>(
+      const payload: OverrideDecisionRequest = {
+        new_action: newAction,
+        override_reason: reason.trim(),
+      };
+      const res = await post<OverrideDecisionResponse>(
         `/api/decisions/${decision.decision_id}/override`,
-        { new_action: newAction, reason: reason.trim() },
+        payload,
       );
-      setResult({ ok: true, message: `Overridden → ${REC_LABEL[newAction]}`, cost: res.cost });
+      setResult({
+        ok: true,
+        message: `Overridden → ${REC_LABEL[newAction]}`,
+        costDelta: res.cost_delta,
+      });
       setShowForm(false);
     } catch (e: unknown) {
       setResult({ ok: false, message: `Error: ${(e as Error).message}` });
@@ -98,9 +120,9 @@ export function DecisionPanel({ incidentId }: Props) {
               : <AlertTriangle size={20} style={{ color: '#E5534B', flexShrink: 0, marginTop: 1 }} />}
             <div>
               <p className="font-semibold text-sm">{result.message}</p>
-              {result.cost != null && (
+              {result.costDelta != null && (
                 <p className="text-xs mt-1" style={{ color: '#B0B3C6' }}>
-                  Cost impact: <span className="font-mono font-semibold">€{result.cost.toFixed(2)}</span>
+                  Cost delta: <span className="font-mono font-semibold">€{result.costDelta.toFixed(2)}</span>
                 </p>
               )}
             </div>
@@ -155,7 +177,7 @@ export function DecisionPanel({ incidentId }: Props) {
                 <p className="text-sm font-semibold mb-4" style={{ color: '#E8913A' }}>Override AI recommendation</p>
 
                 <label className="block text-xs mb-1" style={{ color: '#6B7A99' }}>Change action to</label>
-                <select value={newAction} onChange={e => setNewAction(e.target.value)}
+                <select value={newAction} onChange={e => setNewAction(e.target.value as DecisionAction)}
                   className="w-full rounded-lg px-3 py-2 text-sm mb-4 outline-none"
                   style={{ backgroundColor: '#0E0F14', border: `1px solid ${B}`, color: '#E8E9F0' }}>
                   {(['auto_resolve', 'escalate', 'critical'] as const).map(a => (

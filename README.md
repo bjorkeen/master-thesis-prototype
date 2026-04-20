@@ -277,6 +277,7 @@ curl -X POST http://localhost:4000/api/route \
 | POST | /route | Route incident (calls ML + Twin) |
 | POST | /decisions | Log a completed decision |
 | POST | /decisions/{id}/override | Record human override |
+| GET | /decisions/incident/{id} | Latest logged row (with features) for one incident ID |
 | GET | /decisions/log | Paginated decision history |
 | GET | /decisions/stats | Accuracy, cost, timing metrics |
 | POST | /experiment/start | Begin experiment run |
@@ -284,6 +285,11 @@ curl -X POST http://localhost:4000/api/route \
 | GET | /experiment/results | Final experiment metrics |
 | GET | /experiment/export | Download decision log as CSV |
 | GET | /health | Liveness check |
+
+**Override endpoint contract (`POST /decisions/{id}/override`):**
+- Request body: `{ "new_action": "auto_resolve|escalate|critical", "override_reason": "<text>", "ground_truth": "<optional>" }`
+- Response body includes: `decision_id`, `old_action`, `new_action`, `override_reason`, `cost_delta`
+- `cost_delta` = `cost(new_action) - cost(old_action)` (negative means the override reduced cost)
 
 ---
 

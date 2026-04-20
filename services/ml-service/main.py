@@ -32,6 +32,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 import joblib
 import numpy as np
 import pandas as pd
@@ -68,6 +69,8 @@ FEATURE_COLS = [
     "time_sensitivity",
     "data_domain",
 ]
+
+DECISION_SERVICE_URL = os.getenv("DECISION_SERVICE_URL", "http://localhost:8003")
 
 # ── Pydantic models (request / response shapes) ───────────────────────────────
 
@@ -204,6 +207,46 @@ def _encode_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Return a DataFrame so sklearn sees the column names it was trained on
     return pd.DataFrame(result, columns=FEATURE_COLS)
+
+
+def _build_explanation_response(
+    raw_features: Dict[str, Any],
+    explain_class: str,
+    incident_id: Optional[str],
+) -> ExplanationResponse:
+    """
+    Shared SHAP pipeline for both /explain/features and /explain/{incident_id}.
+    """
+    if model is None or explainer is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model not loaded")
+
+    classes = list(label_encoder.classes_)
+    if explain_class not in classes:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"explain_class must be one of {classes}",
+        )
+
+    df = pd.DataFrame([raw_features])
+    X  = _encode_features(df)
+
+    pred_idx   = model.predict(X)[0]
+    pred_label = label_encoder.inverse_transform([pred_idx])[0]
+
+    shap_exp = explainer(X)
+    class_idx = classes.index(explain_class)
+    sv   = shap_exp.values[0, :, class_idx].tolist()
+    base = float(shap_exp.base_values[0, class_idx])
+
+    return ExplanationResponse(
+        incident_id=incident_id,
+        predicted_class=pred_label,
+        explained_class=explain_class,
+        base_value=base,
+        shap_values=sv,
+        feature_names=feature_names,
+        feature_values=[raw_features[col] for col in FEATURE_COLS],
+    )
 
 
 # ── Startup: load artefacts ────────────────────────────────────────────────────
@@ -368,115 +411,86 @@ async def explain_features(incident: IncidentFeatures, explain_class: str = "esc
       - positive value → this feature pushed the prediction TOWARD explain_class
       - negative value → this feature pushed the prediction AWAY FROM explain_class
     """
-    if model is None or explainer is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model not loaded")
-
-    classes = list(label_encoder.classes_)
-    if explain_class not in classes:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"explain_class must be one of {classes}",
-        )
-
     try:
         raw_dict = incident.model_dump()
-        df = pd.DataFrame([raw_dict])
-        X  = _encode_features(df)          # shape (1, 7)
-
-        # Predict so we can report what the model actually decided
-        pred_idx   = model.predict(X)[0]
-        pred_label = label_encoder.inverse_transform([pred_idx])[0]
-
-        # Compute SHAP values using the new Explanation API.
-        # explainer(X) returns Explanation with .values shape (n_samples, n_features, n_classes)
-        shap_exp = explainer(X)
-        class_idx = classes.index(explain_class)
-
-        # Extract values for the chosen class (shape: n_features,)
-        sv   = shap_exp.values[0, :, class_idx].tolist()
-        base = float(shap_exp.base_values[0, class_idx])
+        response = _build_explanation_response(
+            raw_features=raw_dict,
+            explain_class=explain_class,
+            incident_id=None,
+        )
 
         logger.info(
-            "explain/features → predict=%s  explain_class=%s  base=%.4f",
-            pred_label, explain_class, base,
+            "explain/features → predict=%s  explain_class=%s",
+            response.predicted_class, explain_class,
         )
-
-        return ExplanationResponse(
-            incident_id=None,
-            predicted_class=pred_label,
-            explained_class=explain_class,
-            base_value=base,
-            shap_values=sv,
-            feature_names=feature_names,
-            feature_values=list(raw_dict.values()),
-        )
+        return response
 
     except Exception as exc:
         logger.exception("explain/features failed")
+        if isinstance(exc, HTTPException):
+            raise exc
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Explanation failed: {exc}")
 
 
 @app.get("/explain/{incident_id}", response_model=ExplanationResponse, tags=["Explainability"])
 async def explain_by_id(incident_id: str, explain_class: str = "escalate"):
     """
-    Placeholder for database-backed explanations.
+    Compute SHAP explanation for a real incident_id.
 
-    In the full system the Decision Service stores incidents in PostgreSQL
-    and this endpoint would look them up by incident_id.  For now it returns
-    a canned example so the frontend has something to render while the
-    database integration is built.
-
-    TODO: replace the sample_data block below with a real DB query:
-        incident = db.query(Incident).filter_by(incident_id=incident_id).first()
+    The incident features are looked up from Decision Service decision logs,
+    then explained with the same SHAP pipeline as /explain/features.
     """
-    if model is None or explainer is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model not loaded")
-
-    # ── Placeholder data ──────────────────────────────────────────────────────
-    sample_data = {
-        "anomaly_type": "schema_mismatch",
-        "affected_records_pct": 42.0,
-        "data_source": "iot_stream",
-        "pipeline_stage": "ingestion",
-        "historical_frequency": "occasional",
-        "time_sensitivity": "high",
-        "data_domain": "finance",
-    }
-    # ─────────────────────────────────────────────────────────────────────────
-
-    classes = list(label_encoder.classes_)
-    if explain_class not in classes:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"explain_class must be one of {classes}",
-        )
-
     try:
-        df = pd.DataFrame([sample_data])
-        X  = _encode_features(df)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            decision_res = await client.get(
+                f"{DECISION_SERVICE_URL}/decisions/incident/{incident_id}"
+            )
+            decision_res.raise_for_status()
+            decision_doc = decision_res.json()
 
-        pred_idx   = model.predict(X)[0]
-        pred_label = label_encoder.inverse_transform([pred_idx])[0]
+        raw_features: Dict[str, Any] = {}
+        nested = decision_doc.get("incident_features") or {}
+        for col in FEATURE_COLS:
+            value = decision_doc.get(col, nested.get(col))
+            if value is None:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    f"Incident {incident_id} is missing required feature '{col}'",
+                )
+            raw_features[col] = value
 
-        shap_exp  = explainer(X)
-        class_idx = classes.index(explain_class)
-        sv   = shap_exp.values[0, :, class_idx].tolist()
-        base = float(shap_exp.base_values[0, class_idx])
+        raw_features["affected_records_pct"] = float(raw_features["affected_records_pct"])
 
-        logger.info("explain/%s → predict=%s  explain_class=%s", incident_id, pred_label, explain_class)
-
-        return ExplanationResponse(
+        response = _build_explanation_response(
+            raw_features=raw_features,
+            explain_class=explain_class,
             incident_id=incident_id,
-            predicted_class=pred_label,
-            explained_class=explain_class,
-            base_value=base,
-            shap_values=sv,
-            feature_names=feature_names,
-            feature_values=list(sample_data.values()),
         )
+        logger.info(
+            "explain/%s → predict=%s  explain_class=%s",
+            incident_id, response.predicted_class, explain_class,
+        )
+        return response
 
     except Exception as exc:
         logger.exception("explain/%s failed", incident_id)
+        if isinstance(exc, HTTPException):
+            raise exc
+        if isinstance(exc, httpx.ConnectError):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"Cannot reach Decision Service at {DECISION_SERVICE_URL}. Is it running?",
+            )
+        if isinstance(exc, httpx.HTTPStatusError):
+            if exc.response.status_code == 404:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND,
+                    f"Incident {incident_id} not found in Decision Service log.",
+                )
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Decision Service returned an error: {exc.response.text}",
+            )
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Explanation failed: {exc}")
 
 

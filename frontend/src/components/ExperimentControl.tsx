@@ -186,40 +186,47 @@ export function ExperimentControl() {
       const resolution_time_s = (Date.now() - startMs) / 1000;
 
       /*
-       * Decide whether to auto-log or queue for human review.
+       * Log EVERY incident to the decision log so it appears in IncidentQueue.
        *
-       * ai_only    → log every incident automatically (AI made the call)
-       * hitl       → auto_resolve decisions are logged; escalate/critical
-       *              are left in the queue for human review
-       * human_only → everything needs human review; nothing is auto-logged
+       * ai_only    → AI decided; human_action = ai_recommendation (closed)
+       * hitl       → auto_resolve: fully closed; escalate/critical: human_action
+       *              is null so the analyst sees it as PENDING in the queue
+       * human_only → all incidents logged with human_action = null (PENDING)
+       *
+       * The analyst acts via DecisionPanel (Accept / Override), which updates
+       * the existing row via POST /decisions/{id}/override.
        */
       const needsHuman =
         mode === 'human_only' ||
         (mode === 'hitl' && route.routing_decision !== 'auto_resolve');
 
-      if (!needsHuman) {
-        // Auto-log the decision
-        try {
-          await post('/api/decisions', {
-            incident_id:       route.incident_id,
-            experiment_mode:   route.experiment_mode,
-            incident_features: features,
-            ai_recommendation: route.ai_recommendation,
-            ai_confidence:     route.ai_confidence,
-            routing_action:    route.routing_decision,
-            human_action:      null,
-            final_action:      route.routing_decision,
-            ground_truth:      ground_truth,
-            resolution_time_s: resolution_time_s,
-          });
-          autoResolved++;
-          setBatchAutoResolved(autoResolved);
-        } catch {
-          // Non-fatal — continue processing; dashboard will show what was logged
-        }
-      } else {
+      // human_action: set to ai_recommendation for ai_only (fully automated),
+      // null for everything else (human review pending or not applicable).
+      const human_action = mode === 'ai_only' ? route.ai_recommendation : null;
+
+      try {
+        await post('/api/decisions', {
+          incident_id:       route.incident_id,
+          experiment_mode:   mode,
+          incident_features: features,
+          ai_recommendation: route.ai_recommendation,
+          ai_confidence:     route.ai_confidence,
+          routing_action:    route.routing_decision,
+          human_action,
+          final_action:      route.routing_decision,
+          ground_truth:      ground_truth,
+          resolution_time_s: resolution_time_s,
+        });
+      } catch {
+        // Non-fatal — continue processing; partial results still useful
+      }
+
+      if (needsHuman) {
         pending++;
         setBatchPending(pending);
+      } else {
+        autoResolved++;
+        setBatchAutoResolved(autoResolved);
       }
 
       setBatchDone(i + 1);
