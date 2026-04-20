@@ -10,6 +10,7 @@ import { CheckCircle, ArrowLeftRight, XCircle, AlertTriangle } from 'lucide-reac
 import { useApi } from '../hooks/useApi';
 import type {
   Decision,
+  DecisionStats,
   DecisionAction,
   OverrideDecisionRequest,
   OverrideDecisionResponse,
@@ -40,8 +41,15 @@ export function DecisionPanel({ incidentId }: Props) {
   useEffect(() => {
     if (!incidentId) { setDecision(null); setResult(null); setShowForm(false); return; }
     setLoading(true); setResult(null); setShowForm(false);
-    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 1000 })
-      .then(r => {
+    get<DecisionStats>('/api/decisions/stats')
+      .then((stats) => {
+        if (!stats.run_id) return null;
+        return get<LogResponse | LogEntry[]>('/api/decisions/log', {
+          page: 1, page_size: 1000, run_id: stats.run_id,
+        });
+      })
+      .then((r) => {
+        if (!r) { setDecision(null); return; }
         const list = Array.isArray(r) ? r : (r as LogResponse).decisions ?? [];
         setDecision(list.find(d => d.incident_id === incidentId) ?? null);
       })

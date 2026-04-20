@@ -41,6 +41,8 @@ interface SampledIncident {
 }
 
 const B = '#2A2B38';
+const PROTOCOL_INCIDENT_COUNT = 300;
+const PROTOCOL_SAMPLE_SEED = 42;
 
 const MODES: { key: ExperimentMode; label: string; color: string; desc: string }[] = [
   { key: 'ai_only',    label: 'AI-Only',    color: '#4C8BF5', desc: 'AI decides all incidents automatically' },
@@ -97,7 +99,8 @@ export function ExperimentControl() {
   const [error,   setError]   = useState<string | null>(null);
 
   // Batch runner state
-  const [batchCount,        setBatchCount]        = useState(300);
+  const [batchCount]        = useState(PROTOCOL_INCIDENT_COUNT);
+  const [sampleSeed]        = useState(PROTOCOL_SAMPLE_SEED);
   const [batchDelay,        setBatchDelay]        = useState(100);
   const [batchRunning,      setBatchRunning]      = useState(false);
   const [batchDone,         setBatchDone]         = useState(0);
@@ -152,7 +155,7 @@ export function ExperimentControl() {
     // 1. Fetch the stratified sample from the backend
     try {
       const resp = await get<{ count: number; incidents: SampledIncident[] }>(
-        '/api/incidents/sample', { count: batchCount }
+        '/api/incidents/sample', { count: batchCount, seed: sampleSeed }
       );
       incidents = resp.incidents;
     } catch (e: unknown) {
@@ -359,9 +362,20 @@ export function ExperimentControl() {
                     </label>
                     <input
                       type="number" min={1} max={3000} value={batchCount}
-                      onChange={e => setBatchCount(Math.max(1, Math.min(3000, Number(e.target.value))))}
+                      disabled
                       className="w-24 rounded-lg px-3 py-1.5 text-sm text-center outline-none"
-                      style={{ backgroundColor: '#0E0F14', border: `1px solid ${B}`, color: '#E8E9F0' }}
+                      style={{ backgroundColor: '#0E0F14', border: `1px solid ${B}`, color: '#E8E9F0', opacity: 0.75 }}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs" style={{ color: '#6B7A99' }}>
+                      Sample seed
+                    </label>
+                    <input
+                      type="number" min={0} value={sampleSeed}
+                      disabled
+                      className="w-28 rounded-lg px-3 py-1.5 text-sm text-center outline-none"
+                      style={{ backgroundColor: '#0E0F14', border: `1px solid ${B}`, color: '#E8E9F0', opacity: 0.75 }}
                     />
                   </div>
                   <div className="flex flex-col gap-1 flex-1">
@@ -387,6 +401,9 @@ export function ExperimentControl() {
                     : mode === 'hitl'
                     ? 'Auto-resolve decisions are logged immediately. Escalated/critical incidents are queued for human review in the Incident Queue.'
                     : 'All incidents will be queued for human review. Check the Incident Queue to make decisions.'}
+                </p>
+                <p className="text-xs mb-3" style={{ color: '#4A4D60' }}>
+                  Protocol lock: {batchCount} incidents, seed {sampleSeed}.
                 </p>
 
                 <button onClick={handleLoadAndRun}

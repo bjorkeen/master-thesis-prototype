@@ -58,11 +58,11 @@ const twinProxy = createProxyMiddleware({
 });
 
 // Decision Service: /api/decisions/... → /decisions/..., /api/experiment/... → /experiment/..., etc.
-// Strips only "/api" — the remaining path (/decisions, /experiment, /config, /route, /incidents) is correct.
+// Strips only "/api" — the remaining path (/decisions, /experiment, /config, /route, /incidents, /health) is correct.
 const decisionProxy = createProxyMiddleware({
   target: "http://localhost:8003",
   changeOrigin: true,
-  pathFilter: ["/api/decisions/**", "/api/experiment/**", "/api/config/**", "/api/route/**", "/api/incidents/**"],
+  pathFilter: ["/api/decisions/**", "/api/experiment/**", "/api/config/**", "/api/route/**", "/api/incidents/**", "/api/health"],
   pathRewrite: { "^/api": "" },   // /api/incidents/sample → /incidents/sample
 });
 
@@ -117,5 +117,5 @@ server.listen(PORT, () => {
   console.log(`Gateway listening on http://localhost:${PORT}`);
   console.log(`  ML       → http://localhost:8001  (via /api/predict, /api/explain, /api/model)`);
   console.log(`  Twin     → http://localhost:8002  (via /api/twin  →  strips /api/twin)`);
-  console.log(`  Decision → http://localhost:8003  (via /api/route, /api/decisions, /api/experiment, /api/config, /api/incidents)`);
+  console.log(`  Decision → http://localhost:8003  (via /api/route, /api/decisions, /api/experiment, /api/config, /api/incidents, /api/health)`);
 });

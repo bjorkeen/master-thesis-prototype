@@ -178,16 +178,16 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - GET /health — output: {status, snapshot_count}
 
 ### Decision Service (:8003)
-- POST /route — THE MAIN ENDPOINT: takes incident features, calls ML+Twin, returns routing decision with explanation
-- POST /decisions — logs a completed decision record with ground_truth, computes is_correct and cost
-- POST /decisions/{id}/override — records human override, recalculates cost
+- POST /route — THE MAIN ENDPOINT: takes incident features, calls ML+Twin, returns routing decision with explanation (requires active experiment)
+- POST /decisions — logs a decision row, computes is_correct/cost (requires active experiment + mode match)
+- POST /decisions/{id}/override — records human decision update for the active run only
 - GET /decisions/log?page=1&page_size=20&mode=hitl&run_id=X — paginated decision history
 - GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; returns cost_breakdown (not by_action)
 - POST /experiment/start — input: {mode, incident_count} → begins new run, resets Twin
 - POST /experiment/stop — ends run, computes final ExperimentResults
 - GET /experiment/results — returns ExperimentResults for last completed run
 - GET /experiment/export?run_id=X — streams decision log as CSV download
-- GET /incidents/sample?count=300 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); returns [{7 features + ground_truth}]
+- GET /incidents/sample?count=300&seed=42 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); protocol lock enforces count and seed
 - GET /health — output: {status, experiment_mode, experiment_active, decision_count}
 
 ## Gateway Proxy Path Rewriting
@@ -219,8 +219,9 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
   The component zips them internally into {feature, value, display} objects for the chart.
 - AnalyticsDashboard reads stats.cost_breakdown (not by_action) for the decision
   distribution chart. cost_breakdown is keyed by action with {count, total_cost} per entry.
-- ExperimentControl includes a batch incident runner: after starting an experiment, the
-  user clicks "Load & Run Incidents" to fetch a stratified sample via GET /incidents/sample,
+-- ExperimentControl includes a batch incident runner: after starting an experiment, the
+  user clicks "Load & Run Incidents" to fetch a stratified sample via GET /incidents/sample
+  using the protocol-locked count/seed,
   then process each through /route + /decisions sequentially with a configurable delay.
   In HITL mode, auto_resolve decisions are logged immediately; escalate/critical are counted
   as pending for human review. IncidentQueue polls every 5s to stay current.
@@ -229,6 +230,7 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
     thresholds_used, twin_context, experiment_mode
   - DecisionStats uses cost_breakdown: Record<string, {count, total_cost}> (not by_action)
   - Decision.routing_action uses 'auto_resolve'|'escalate'|'critical' (not send_to_human/critical_alert)
+  - HITL routing in backend is class-aware safety-first (critical class is never auto-resolved)
   - ExperimentResults includes correct_decisions, avg_cost_per_incident, cost_breakdown
 
 ## Important Notes for Claude Code

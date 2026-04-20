@@ -30,26 +30,27 @@ critical_threshold: 0.50
 
 # ---- SLA and time-pressure behavior ----
 
-# sla_escalation_boost: if true, reduce the above thresholds proportionally as
-# the SLA deadline approaches. This converts "ambiguous" into "critical"
-# to ensure coverage within SLA window.
-# Implementation: as sla_remaining_seconds decreases, the effective thresholds
-# are adjusted downward (raising the bar for auto-resolve, lowering for critical).
+# sla_escalation_boost: if true, tighten decision gates as SLA pressure rises.
+# Implementation in Decision Service:
+#   - auto_resolve threshold is increased (harder to auto-close incidents)
+#   - critical threshold is increased (more incidents can be flagged critical)
+# This is safety-first under time pressure.
 sla_escalation_boost: true
 
 # sla_boost_schedule: when to apply which boost factors as SLA drains.
 # (used in Twin Service to adjust thresholds based on remaining time)
 sla_boost_schedule:
-  # Once ≤10 minutes remain, lower auto_resolve_threshold by 10%
-  # (from 0.85 → 0.765) to be extra conservative
+  # Once ≤10 minutes remain, tighten auto_resolve by +10%
+  # (from 0.85 → 0.935) to be extra conservative
   minutes_remaining_10:
     auto_resolve_threshold_reduction: 0.10
     critical_threshold_increase: 0.05
 
-  # Once ≤5 minutes remain, lower even more
+  # Once ≤5 minutes remain, tighten even more
+  # (0.85 × 1.20 = 1.02, capped to 0.999 in code)
   minutes_remaining_5:
-    auto_resolve_threshold_reduction: 0.20 # 0.85 → 0.68
-    critical_threshold_increase: 0.10 # 0.50 → 0.60
+    auto_resolve_threshold_reduction: 0.20
+    critical_threshold_increase: 0.10 # 0.50 → 0.55
 
 # ---- Experiment control ----
 
@@ -59,7 +60,10 @@ default_experiment_mode: "hitl"
 
 # max_incidents_per_experiment: safety limit on dataset size per run.
 # (prevents runaway experiments from consuming all 3,000 incidents at once)
-max_incidents_per_experiment: 500
+max_incidents_per_experiment: 300
+
+# experiment_seed: fixed random seed for reproducible participant/arm sampling.
+experiment_seed: 42
 
 # ---- Twin service integration ----
 

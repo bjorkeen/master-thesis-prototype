@@ -265,13 +265,13 @@ def _compute_thresholds(sla_remaining_s: float) -> Dict[str, float]:
         boost = schedule.get("minutes_remaining_5", {})
         auto_reduction = boost.get("auto_resolve_threshold_reduction", 0.20)
         crit_increase  = boost.get("critical_threshold_increase",      0.10)
-        auto  = base_auto * (1 - auto_reduction)
+        auto  = base_auto * (1 + auto_reduction)
         crit  = base_critical * (1 + crit_increase)
     elif sla_remaining_s < 600:  # < 10 minutes
         boost = schedule.get("minutes_remaining_10", {})
         auto_reduction = boost.get("auto_resolve_threshold_reduction", 0.10)
         crit_increase  = boost.get("critical_threshold_increase",      0.05)
-        auto  = base_auto * (1 - auto_reduction)
+        auto  = base_auto * (1 + auto_reduction)
         crit  = base_critical * (1 + crit_increase)
     else:
         auto, crit = base_auto, base_critical
@@ -318,26 +318,44 @@ def _apply_routing_logic(
         )
 
     else:
-        # HITL mode: confidence thresholds determine routing.
-        if confidence >= auto_thresh:
-            decision    = "auto_resolve"
-            explanation = (
-                f"HITL: confidence {confidence:.3f} ≥ {auto_thresh} "
-                f"→ auto-resolve (AI: {ai_recommendation})."
-            )
-        elif confidence < crit_thresh:
+        # HITL mode: class-aware routing with confidence gates.
+        #
+        # Rationale:
+        # - A critical AI class remains critical (safety-first).
+        # - Auto-resolve is only allowed for high-confidence auto_resolve class.
+        # - Escalate remains the default human-review path for ambiguity.
+        if ai_recommendation == "critical":
             decision    = "critical"
             explanation = (
-                f"HITL: confidence {confidence:.3f} < {crit_thresh} "
-                f"→ critical (model is uncertain; immediate review required)."
+                f"HITL: AI class is critical (conf={confidence:.3f}) "
+                f"→ route critical (safety-first)."
             )
+        elif ai_recommendation == "auto_resolve":
+            if confidence >= auto_thresh:
+                decision    = "auto_resolve"
+                explanation = (
+                    f"HITL: auto_resolve class with confidence {confidence:.3f} ≥ {auto_thresh} "
+                    f"→ auto-resolve."
+                )
+            else:
+                decision    = "escalate"
+                explanation = (
+                    f"HITL: auto_resolve class but confidence {confidence:.3f} < {auto_thresh} "
+                    f"→ escalate for human review."
+                )
         else:
-            decision    = "escalate"
-            explanation = (
-                f"HITL: confidence {confidence:.3f} in ambiguous zone "
-                f"[{crit_thresh}, {auto_thresh}) → escalate for human review "
-                f"(AI: {ai_recommendation})."
-            )
+            if confidence < crit_thresh:
+                decision    = "critical"
+                explanation = (
+                    f"HITL: escalate class but confidence {confidence:.3f} < {crit_thresh} "
+                    f"→ critical (high uncertainty near SLA/cost risk)."
+                )
+            else:
+                decision    = "escalate"
+                explanation = (
+                    f"HITL: escalate class with confidence {confidence:.3f} "
+                    f"→ escalate for human review."
+                )
 
     return decision, explanation
 
@@ -566,6 +584,12 @@ async def route_incident(features: IncidentFeatures):
       escalate     → show incident + AI recommendation + SHAP explanation
       critical     → alert the analyst immediately
     """
+    if not experiment["active"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "No active experiment run. Call /experiment/start before routing incidents.",
+        )
+
     # Use httpx as an async HTTP client.
     # timeout=10.0 means: give up if the other service takes >10 seconds to reply.
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -665,6 +689,17 @@ async def log_decision(record: DecisionRecord):
     Notifies Twin Service only for fully resolved rows; pending review rows are
     resolved later via POST /decisions/{id}/override.
     """
+    if not experiment["active"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "No active experiment run. Decisions can only be logged during an active run.",
+        )
+    if record.experiment_mode != experiment["mode"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Payload experiment_mode={record.experiment_mode} does not match active mode={experiment['mode']}.",
+        )
+
     decision_id = _new_id()
 
     # Determine is_correct: did final_action match ground truth?
@@ -680,7 +715,7 @@ async def log_decision(record: DecisionRecord):
         "decision_id":         decision_id,
         "run_id":              experiment["run_id"],
         "incident_id":         record.incident_id,
-        "experiment_mode":     record.experiment_mode,
+        "experiment_mode":     experiment["mode"],
         "incident_features":   record.incident_features,
         "ai_recommendation":   record.ai_recommendation,
         "ai_confidence":       record.ai_confidence,
@@ -732,6 +767,12 @@ async def override_decision(decision_id: str, override: OverrideRequest):
     If the row was pending human review, this endpoint also marks the incident
     resolved in Twin Service.
     """
+    if not experiment["active"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "No active experiment run. Overrides are only allowed during an active run.",
+        )
+
     if decision_id not in decision_index:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -740,6 +781,11 @@ async def override_decision(decision_id: str, override: OverrideRequest):
 
     idx = decision_index[decision_id]
     doc = decision_log[idx]
+    if doc.get("run_id") != experiment.get("run_id"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Decision does not belong to the active run and cannot be modified.",
+        )
     was_pending = _is_pending_human_review(doc)
 
     old_action = doc["final_action"]
@@ -868,6 +914,12 @@ async def start_experiment(request: ExperimentStartRequest):
 
     Call this before submitting incidents for a new experiment.
     """
+    if experiment["active"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "An experiment is already active. Stop the current run before starting a new one.",
+        )
+
     # Reset Twin Service state
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -907,11 +959,18 @@ async def stop_experiment():
             "No experiment is currently active. Call /experiment/start first.",
         )
 
+    decisions = _current_run_decisions()
+    pending_count = sum(1 for d in decisions if _is_pending_human_review(d))
+    if pending_count > 0:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot stop experiment: {pending_count} incident(s) are still pending human review.",
+        )
+
     experiment["active"]     = False
     experiment["stopped_at"] = _now()
 
     # Compute final metrics
-    decisions = _current_run_decisions()
     stats     = _compute_stats(decisions)
 
     results = ExperimentResults(
@@ -931,6 +990,10 @@ async def stop_experiment():
     )
 
     experiment["results"] = results.model_dump()
+
+    # Freeze the run context after completion so post-stop calls cannot
+    # accidentally append more rows to the finished run_id.
+    experiment["run_id"] = None
 
     return {
         "message": f"Experiment {experiment['run_id']} stopped.",
@@ -1044,6 +1107,33 @@ async def sample_incidents(
     ready to be POSTed to /route.
     """
     csv_path = PROJECT_ROOT / "data" / "incidents.csv"
+
+    max_per_experiment = int(routing_cfg.get("max_incidents_per_experiment", 3000))
+    protocol_seed = routing_cfg.get("experiment_seed")
+
+    if count != max_per_experiment:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Protocol lock: count must be exactly {max_per_experiment}.",
+        )
+
+    if protocol_seed is not None:
+        if seed is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Protocol lock: seed is required and must be {int(protocol_seed)}.",
+            )
+        if int(seed) != int(protocol_seed):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Protocol lock: seed must be {int(protocol_seed)}.",
+            )
+
+    if count > max_per_experiment:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Requested count={count} exceeds max_incidents_per_experiment={max_per_experiment}.",
+        )
 
     if not csv_path.exists():
         raise HTTPException(

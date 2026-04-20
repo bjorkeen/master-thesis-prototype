@@ -38,13 +38,13 @@ Three experimental modes are compared:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    React Frontend (:5173)                     │
-│  IncidentQueue · ShapExplainer · DecisionPanel · TwinState   │
+│                    React Frontend (:5173)                   │
+│  IncidentQueue · ShapExplainer · DecisionPanel · TwinState  │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP + WebSocket
 ┌──────────────────────────┴──────────────────────────────────┐
-│                 Node.js API Gateway (:4000)                   │
-│              Express + Socket.io + Proxy                      │
+│                 Node.js API Gateway (:4000)                 │
+│              Express + Socket.io + Proxy                    │
 └───────┬──────────────────┬──────────────────┬───────────────┘
         │                  │                  │
    ┌────┴────┐       ┌────┴────┐       ┌────┴────┐
@@ -55,13 +55,13 @@ Three experimental modes are compared:
    │ sklearn │       │ State   │       │ Routing │
    │ SHAP    │       │ Engine  │       │ Logging │
    └────┬────┘       └────┬────┘       └────┬────┘
-        │                  │                  │
-        └──────────────────┴──────────────────┘
-                           │
-                    ┌──────┴──────┐
-                    │  SQLite /   │
-                    │ PostgreSQL  │
-                    └─────────────┘
+        │                 │                  │
+        └─────────────────┴──────────────────┘
+                          │
+                    ┌─────┴──────┐
+                    │  SQLite /  │
+                    │ PostgreSQL │
+                    └────────────┘
 ```
 
 > **Note:** The prototype uses in-memory storage within each service for
@@ -179,14 +179,16 @@ python data/create_tables.py      # → data/hitl_cdt.db
 ### 2. Start the Python services (3 terminals)
 ```bash
 # Terminal 1 — ML Service
-cd services/ml-service && uvicorn main:app --port 8001 --reload
+cd services/ml-service && uvicorn main:app --port 8001
 
 # Terminal 2 — Twin Service
-cd services/twin-service && uvicorn main:app --port 8002 --reload
+cd services/twin-service && uvicorn main:app --port 8002
 
 # Terminal 3 — Decision Service
-cd services/decision-service && uvicorn main:app --port 8003 --reload
+cd services/decision-service && uvicorn main:app --port 8003
 ```
+
+> For live participant sessions, avoid `--reload` to prevent accidental in-memory state resets.
 
 ### 3. Start the gateway
 ```bash
@@ -239,8 +241,9 @@ curl -X POST http://localhost:4000/api/route \
 | Ambiguity zone | ~32% of incidents | Gaussian noise σ=0.10 |
 | Features | 7 (6 categorical + 1 continuous) | Thesis §3.3.2 |
 | ML model | RandomForest, 200 trees, balanced weights | data/train_model.py |
-| Auto-resolve threshold | confidence ≥ 0.85 | config/routing_config.yaml |
-| Critical threshold | confidence < 0.50 | config/routing_config.yaml |
+| HITL routing policy | Class-aware with confidence gates (critical safety-first, guarded auto-resolve) | services/decision-service/main.py |
+| Base auto-resolve threshold | confidence ≥ 0.85 for auto_resolve class | config/routing_config.yaml |
+| Base critical threshold | confidence < 0.50 may escalate to critical under class/uncertainty gates | config/routing_config.yaml |
 | Missed critical cost | €100 | config/cost_model.yaml |
 | False escalation cost | €10 | config/cost_model.yaml |
 | Experiment incidents | 300 per run | Thesis §3.4 |
@@ -284,7 +287,7 @@ curl -X POST http://localhost:4000/api/route \
 | POST | /experiment/stop | End experiment, compute results |
 | GET | /experiment/results | Final experiment metrics |
 | GET | /experiment/export | Download decision log as CSV |
-| GET | /incidents/sample | Stratified incident sample (`seed` optional for reproducibility) |
+| GET | /incidents/sample | Stratified incident sample (protocol-locked `count` and `seed`) |
 | GET | /health | Liveness check |
 
 **Override endpoint contract (`POST /decisions/{id}/override`):**
@@ -292,6 +295,8 @@ curl -X POST http://localhost:4000/api/route \
 - Response body includes: `decision_id`, `old_action`, `new_action`, `override_reason`, `cost_delta`
 - `cost_delta` = `cost(new_action) - cost(old_action)` (negative means the override reduced cost)
 - Experiment metrics and default CSV export include **resolved** decisions only (pending review rows are excluded unless `include_pending=true` is passed to export)
+- `POST /route` and `POST /decisions` require an **active** experiment run
+- Protocol lock: sampling is server-enforced to `max_incidents_per_experiment` and configured seed
 
 ---
 
@@ -303,7 +308,8 @@ This prototype is the practical artefact for a Design Science Research (DSR) the
 - **H2**: Explainable AI outputs positively influence human trust and decision calibration
 - **H3**: The CDT architecture supports structured human oversight without unacceptable latency
 
-The evaluation compares the three modes on: decision accuracy (macro F1), resolution time, operational cost, perceived trust (Likert scale), and system latency.
+The live prototype computes resolved-decision metrics (accuracy, cost, resolution time, override rate) per run.
+Macro-F1, trust (Likert), and end-to-end latency are analyzed in the experimental data-analysis phase.
 
 ---
 

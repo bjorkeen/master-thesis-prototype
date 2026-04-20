@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import type { Decision } from '../types';
+import type { Decision, DecisionStats } from '../types';
 
 // The log endpoint flattens incident_features into the top-level doc, but we
 // also keep incident_features as a typed fallback for robustness.
@@ -127,8 +127,18 @@ export function IncidentQueue({ onSelect }: Props) {
 
   function fetchEntries(showSpinner = false) {
     if (showSpinner) setRefreshing(true);
-    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 1000 })
-      .then(r => {
+    get<DecisionStats>('/api/decisions/stats')
+      .then((stats) => {
+        if (!stats.run_id) {
+          setEntries([]);
+          return null;
+        }
+        return get<LogResponse | LogEntry[]>('/api/decisions/log', {
+          page: 1, page_size: 1000, run_id: stats.run_id,
+        });
+      })
+      .then((r) => {
+        if (!r) return;
         setEntries(Array.isArray(r) ? r : (r as LogResponse).decisions ?? []);
         setError(null);
       })

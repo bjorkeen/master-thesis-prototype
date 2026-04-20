@@ -11,7 +11,7 @@
  * Twin state arrives via WebSocket and is passed down to panels that need it.
  */
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Inbox,
   Brain,
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 
 import { useWebSocket } from './hooks/useWebSocket';
+import { useApi } from './hooks/useApi';
 import { IncidentQueue }     from './components/IncidentQueue';
 import { ShapExplainer }     from './components/ShapExplainer';
 import { DecisionPanel }     from './components/DecisionPanel';
@@ -52,6 +53,37 @@ export default function App() {
   const [activePanel, setActivePanel] = useState<PanelKey>('queue');
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const { twinState, connected } = useWebSocket();
+  const { get } = useApi();
+  const [experimentCtx, setExperimentCtx] = useState<{ mode: string; active: boolean } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    async function pollCtx() {
+      try {
+        const health = await get<{ experiment_mode: string; experiment_active: boolean }>('/api/health');
+        if (mounted) setExperimentCtx({ mode: health.experiment_mode, active: health.experiment_active });
+      } catch {
+        // Ignore transient API errors; UI can continue without mode lock.
+      }
+    }
+    pollCtx();
+    const id = setInterval(pollCtx, 5000);
+    return () => { mounted = false; clearInterval(id); };
+  }, [get]);
+
+  const aiPanelsLocked = experimentCtx?.active && experimentCtx.mode === 'human_only';
+  const visibleNavItems = useMemo(
+    () => aiPanelsLocked
+      ? NAV_ITEMS.filter(({ key }) => key !== 'shap' && key !== 'analytics')
+      : NAV_ITEMS,
+    [aiPanelsLocked]
+  );
+
+  useEffect(() => {
+    if (aiPanelsLocked && (activePanel === 'shap' || activePanel === 'analytics')) {
+      setActivePanel('queue');
+    }
+  }, [aiPanelsLocked, activePanel]);
 
   // All panels are always mounted; only the active one is visible.
   // This preserves component state (e.g. a running experiment) across navigation.
@@ -81,7 +113,7 @@ export default function App() {
 
         {/* Nav links */}
         <nav className="flex-1 py-4 space-y-0.5 px-2">
-          {NAV_ITEMS.map(({ key, label, Icon }) => {
+          {visibleNavItems.map(({ key, label, Icon }) => {
             const active = activePanel === key;
             return (
               <button
@@ -99,6 +131,13 @@ export default function App() {
             );
           })}
         </nav>
+
+        {aiPanelsLocked && (
+          <div className="mx-3 mb-3 px-2.5 py-2 rounded-md text-[11px]"
+            style={{ color: '#E8913A', backgroundColor: 'rgba(232,145,58,0.12)', border: '1px solid rgba(232,145,58,0.35)' }}>
+            Human-only mode active: AI Explanation and Analytics panels are hidden.
+          </div>
+        )}
 
         {/* WebSocket status indicator */}
         <div
@@ -120,18 +159,22 @@ export default function App() {
         <div style={panelStyle('queue')}>
           <IncidentQueue onSelect={setSelectedIncidentId} />
         </div>
-        <div style={panelStyle('shap')}>
-          <ShapExplainer incidentId={selectedIncidentId} />
-        </div>
+        {!aiPanelsLocked && (
+          <div style={panelStyle('shap')}>
+            <ShapExplainer incidentId={selectedIncidentId} />
+          </div>
+        )}
         <div style={panelStyle('decision')}>
           <DecisionPanel incidentId={selectedIncidentId} />
         </div>
         <div style={panelStyle('twin')}>
           <TwinStatePanel twinState={twinState} connected={connected} />
         </div>
-        <div style={panelStyle('analytics')}>
-          <AnalyticsDashboard />
-        </div>
+        {!aiPanelsLocked && (
+          <div style={panelStyle('analytics')}>
+            <AnalyticsDashboard />
+          </div>
+        )}
         <div style={panelStyle('experiment')}>
           <ExperimentControl />
         </div>

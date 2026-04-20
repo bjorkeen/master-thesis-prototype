@@ -64,12 +64,16 @@ export function AnalyticsDashboard() {
   const [error,     setError]     = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      get<DecisionStats>('/api/decisions/stats'),
-      get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 1000 }),
-    ])
-      .then(([s, r]) => {
+    get<DecisionStats>('/api/decisions/stats')
+      .then(async (s) => {
         setStats(s);
+        if (!s.run_id) {
+          setDecisions([]);
+          return;
+        }
+        const r = await get<LogResponse | LogEntry[]>('/api/decisions/log', {
+          page: 1, page_size: 1000, run_id: s.run_id,
+        });
         setDecisions(Array.isArray(r) ? r : (r as LogResponse).decisions ?? []);
       })
       .catch(e => setError(e.message))
