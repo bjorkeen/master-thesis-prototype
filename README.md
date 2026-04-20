@@ -42,11 +42,11 @@ Three experimental modes are compared:
 │  IncidentQueue · ShapExplainer · DecisionPanel · TwinState  │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP + WebSocket
-┌──────────────────────────┴──────────────────────────────────┐
-│                 Node.js API Gateway (:4000)                 │
-│              Express + Socket.io + Proxy                    │
-└───────┬──────────────────┬──────────────────┬───────────────┘
-        │                  │                  │
+┌──────────────────────────┴────────────────────────────────┐
+│                 Node.js API Gateway (:4000)               │
+│              Express + Socket.io + Proxy                  │
+└───────┬─────────────────┬─────────────────┬───────────────┘
+        │                 │                 │
    ┌────┴────┐       ┌────┴────┐       ┌────┴────┐
    │ ML Svc  │       │ Twin    │       │Decision │
    │ :8001   │       │ Svc     │       │ Svc     │
@@ -55,8 +55,8 @@ Three experimental modes are compared:
    │ sklearn │       │ State   │       │ Routing │
    │ SHAP    │       │ Engine  │       │ Logging │
    └────┬────┘       └────┬────┘       └────┬────┘
-        │                 │                  │
-        └─────────────────┴──────────────────┘
+        │                 │                 │
+        └─────────────────┴─────────────────┘
                           │
                     ┌─────┴──────┐
                     │  SQLite /  │
