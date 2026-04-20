@@ -96,6 +96,8 @@ class PipelineState(BaseModel):
     # How many seconds remain before SLA breach
     sla_remaining_s: float = Field(...,
         description="Seconds remaining before SLA breach")
+    sla_total_s: float = Field(...,
+        description="Total SLA window in seconds (constant for this run)")
 
     # Fraction of all resolved incidents that were auto-resolved (no human needed)
     auto_resolve_rate: float = Field(...,
@@ -225,6 +227,7 @@ def _initial_state() -> dict:
         "throughput_per_hour":  0.0,
         "analyst_workload_pct": 0.0,
         "sla_remaining_s":      SLA_TOTAL_SECONDS,
+        "sla_total_s":          SLA_TOTAL_SECONDS,
         "auto_resolve_rate":    0.0,
         "timestamp":            _now(),
     }
@@ -583,6 +586,7 @@ async def simulate(scenario: SimulateRequest):
         throughput_per_hour=current_state["throughput_per_hour"],  # unchanged in projection
         analyst_workload_pct=proj_workload,
         sla_remaining_s=proj_sla,
+        sla_total_s=SLA_TOTAL_SECONDS,
         auto_resolve_rate=proj_auto_rate,
         timestamp=_now(),
     )

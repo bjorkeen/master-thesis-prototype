@@ -78,6 +78,7 @@ export interface TwinState {
   throughput_per_hour: number;
   analyst_workload_pct: number;      // 0–100
   sla_remaining_s: number;          // seconds until SLA breach
+  sla_total_s: number;              // total SLA window in seconds
   auto_resolve_rate: number;        // 0–1 fraction
   snapshot_id?: number;
   timestamp?: string;

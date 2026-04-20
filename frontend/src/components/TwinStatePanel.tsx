@@ -13,10 +13,6 @@ const OR = '#E8913A';   // orange
 const RD = '#E5534B';   // red
 const YL = '#F0C040';   // yellow
 
-// Total SLA window assumed to be 30 minutes (1800 s).
-// The Twin Service tracks remaining seconds; we compute % consumed.
-const SLA_TOTAL_S = 1800;
-
 // Format seconds as "Xm Ys"
 function fmtSla(s: number): string {
   const m = Math.floor(Math.max(0, s) / 60);
@@ -138,7 +134,8 @@ export function TwinStatePanel({ twinState: ts, connected }: Props) {
 
               {/* SLA Health — bar depletes as time runs out */}
               {(() => {
-                const usedPct = clamp(100 - (ts.sla_remaining_s / SLA_TOTAL_S) * 100);
+                // Use backend-provided SLA total to avoid frontend/backend drift.
+                const usedPct = clamp(100 - (ts.sla_remaining_s / ts.sla_total_s) * 100);
                 const slaColor = usedPct > 80 ? RD : usedPct > 50 ? YL : G;
                 return (
                   <MetricCard
