@@ -4,7 +4,7 @@
  * Usage:
  *   const api = useApi();
  *   const state = await api.get<TwinState>('/api/twin/state');
- *   const result = await api.post<RoutingResponse>('/api/decisions/route', payload);
+ *   const result = await api.post<RoutingResponse>('/api/route', payload);
  *
  * All paths are relative to http://localhost:4000 — the gateway handles
  * routing to the correct Python service.
