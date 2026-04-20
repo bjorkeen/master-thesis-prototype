@@ -263,15 +263,21 @@ def _compute_thresholds(sla_remaining_s: float) -> Dict[str, float]:
 
     if sla_remaining_s < 300:    # < 5 minutes
         boost = schedule.get("minutes_remaining_5", {})
-        auto  = base_auto     - boost.get("auto_resolve_threshold_reduction", 0.20)
-        crit  = base_critical + boost.get("critical_threshold_increase",      0.10)
+        auto_reduction = boost.get("auto_resolve_threshold_reduction", 0.20)
+        crit_increase  = boost.get("critical_threshold_increase",      0.10)
+        auto  = base_auto * (1 - auto_reduction)
+        crit  = base_critical * (1 + crit_increase)
     elif sla_remaining_s < 600:  # < 10 minutes
         boost = schedule.get("minutes_remaining_10", {})
-        auto  = base_auto     - boost.get("auto_resolve_threshold_reduction", 0.10)
-        crit  = base_critical + boost.get("critical_threshold_increase",      0.05)
+        auto_reduction = boost.get("auto_resolve_threshold_reduction", 0.10)
+        crit_increase  = boost.get("critical_threshold_increase",      0.05)
+        auto  = base_auto * (1 - auto_reduction)
+        crit  = base_critical * (1 + crit_increase)
     else:
         auto, crit = base_auto, base_critical
 
+    auto = max(0.0, min(0.999, auto))
+    crit = max(0.0, min(0.999, crit))
     return {"auto_resolve": round(auto, 3), "critical": round(crit, 3)}
 
 
@@ -433,10 +439,15 @@ def _compute_stats(decisions: List[dict]) -> dict:
     Aggregate accuracy, cost, resolution time, and override stats
     from a list of decision records.
     """
-    total   = len(decisions)
+    total_logged = len(decisions)
+    resolved = [d for d in decisions if not _is_pending_human_review(d)]
+    pending_count = total_logged - len(resolved)
+    total = len(resolved)
     if total == 0:
         return {
             "total_decisions": 0,
+            "total_logged": total_logged,
+            "pending_count": pending_count,
             "correct_decisions": 0,
             "accuracy": 0.0,
             "total_cost": 0.0,
@@ -447,17 +458,17 @@ def _compute_stats(decisions: List[dict]) -> dict:
             "cost_breakdown": {},
         }
 
-    correct   = sum(1 for d in decisions if d.get("is_correct") is True)
-    total_cost = sum(d.get("cost", 0.0) or 0.0 for d in decisions)
-    overrides  = sum(1 for d in decisions if d.get("human_override_to") is not None)
+    correct   = sum(1 for d in resolved if d.get("is_correct") is True)
+    total_cost = sum(d.get("cost", 0.0) or 0.0 for d in resolved)
+    overrides  = sum(1 for d in resolved if d.get("human_override_to") is not None)
 
     # Resolution times (only for decisions where it was recorded)
-    times = [d["resolution_time_s"] for d in decisions if d.get("resolution_time_s")]
+    times = [d["resolution_time_s"] for d in resolved if d.get("resolution_time_s")]
     avg_time = round(sum(times) / len(times), 2) if times else None
 
     # Cost breakdown by routing decision
     breakdown: Dict[str, dict] = {}
-    for d in decisions:
+    for d in resolved:
         action = d.get("final_action", "unknown")
         if action not in breakdown:
             breakdown[action] = {"count": 0, "total_cost": 0.0}
@@ -466,6 +477,8 @@ def _compute_stats(decisions: List[dict]) -> dict:
 
     return {
         "total_decisions":      total,
+        "total_logged":         total_logged,
+        "pending_count":        pending_count,
         "correct_decisions":    correct,
         "accuracy":             round(correct / total, 4) if total else 0.0,
         "total_cost":           round(total_cost, 2),
@@ -738,7 +751,9 @@ async def override_decision(decision_id: str, override: OverrideRequest):
 
     # Update the record in-place
     doc["human_action"]       = override.new_action
-    doc["human_override_to"] = override.new_action
+    doc["human_override_to"] = (
+        override.new_action if override.new_action != doc.get("ai_recommendation") else None
+    )
     doc["override_reason"]   = override.override_reason
     doc["final_action"]      = override.new_action
     doc["ground_truth"]      = ground_truth
@@ -782,7 +797,7 @@ async def get_decision_by_incident(incident_id: str):
 @app.get("/decisions/log", tags=["Decisions"])
 async def get_decision_log(
     page:      int = Query(1,   ge=1,    description="Page number (1-indexed)"),
-    page_size: int = Query(20,  ge=1, le=200, description="Records per page"),
+    page_size: int = Query(20,  ge=1, le=1000, description="Records per page"),
     mode:      Optional[str] = Query(None, description="Filter by experiment mode"),
     run_id:    Optional[str] = Query(None, description="Filter by run ID"),
 ):
@@ -939,7 +954,10 @@ async def get_results():
 
 
 @app.get("/experiment/export", tags=["Experiment"])
-async def export_decisions(run_id: Optional[str] = Query(None)):
+async def export_decisions(
+    run_id: Optional[str] = Query(None),
+    include_pending: bool = Query(False, description="Include unresolved pending-review rows"),
+):
     """
     Download the decision log as a CSV file.
 
@@ -956,6 +974,9 @@ async def export_decisions(run_id: Optional[str] = Query(None)):
         decisions = [d for d in decision_log if d.get("run_id") == run_id]
     else:
         decisions = _current_run_decisions()
+
+    if not include_pending:
+        decisions = [d for d in decisions if not _is_pending_human_review(d)]
 
     if not decisions:
         raise HTTPException(
@@ -1008,6 +1029,10 @@ async def export_decisions(run_id: Optional[str] = Query(None)):
 @app.get("/incidents/sample", tags=["Incidents"])
 async def sample_incidents(
     count: int = Query(300, ge=1, le=3000, description="Number of incidents to sample"),
+    seed: Optional[int] = Query(
+        None,
+        description="Optional RNG seed for reproducible sampling across runs/participants",
+    ),
 ):
     """
     Return a stratified random sample from the incident dataset.
@@ -1036,6 +1061,8 @@ async def sample_incidents(
     if total == 0:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Dataset is empty.")
 
+    rng = random.Random(seed) if seed is not None else random
+
     # ── Stratified sample: keep the same per-class proportions ────────────────
     by_label: Dict[str, List[dict]] = {}
     for row in all_rows:
@@ -1047,7 +1074,7 @@ async def sample_incidents(
         # How many from this class, proportional to requested count
         n = round(count * len(rows) / total)
         n = min(n, len(rows))   # can't exceed what's available
-        sampled.extend(random.sample(rows, n))
+        sampled.extend(rng.sample(rows, n))
 
     # Due to rounding, sampled may be slightly short — top up from the largest class
     while len(sampled) < count:
@@ -1055,9 +1082,9 @@ async def sample_incidents(
         pool = [r for r in by_label[largest] if r not in sampled]
         if not pool:
             break
-        sampled.append(random.choice(pool))
+        sampled.append(rng.choice(pool))
 
-    random.shuffle(sampled)
+    rng.shuffle(sampled)
 
     # ── Build response: 7 features + ground_truth only ────────────────────────
     FEATURE_COLS = [
@@ -1099,7 +1126,7 @@ async def root():
             "POST /experiment/stop":         "End experiment and compute results",
             "GET  /experiment/results":      "Final experiment metrics",
             "GET  /experiment/export":       "Download decision log as CSV",
-            "GET  /incidents/sample":        "Stratified sample from the dataset",
+            "GET  /incidents/sample":        "Stratified sample from the dataset (optional seed)",
             "GET  /docs":                    "Swagger UI",
         },
     }

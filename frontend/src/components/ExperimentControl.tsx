@@ -104,6 +104,7 @@ export function ExperimentControl() {
   const [batchTotal,        setBatchTotal]        = useState(0);
   const [batchAutoResolved, setBatchAutoResolved] = useState(0);
   const [batchPending,      setBatchPending]      = useState(0);
+  const [batchLogFailures,  setBatchLogFailures]  = useState(0);
   const [batchComplete,     setBatchComplete]     = useState(false);
   const [batchError,        setBatchError]        = useState<string | null>(null);
 
@@ -115,7 +116,7 @@ export function ExperimentControl() {
   async function handleStart() {
     setBusy(true); setError(null); setResults(null);
     setBatchDone(0); setBatchTotal(0); setBatchAutoResolved(0);
-    setBatchPending(0); setBatchComplete(false); setBatchError(null);
+    setBatchPending(0); setBatchLogFailures(0); setBatchComplete(false); setBatchError(null);
     try {
       const info = await post<RunInfo>('/api/experiment/start', { mode });
       setRunInfo(info);
@@ -143,7 +144,7 @@ export function ExperimentControl() {
 
   async function handleLoadAndRun() {
     setBatchRunning(true); setBatchError(null); setBatchComplete(false);
-    setBatchDone(0); setBatchAutoResolved(0); setBatchPending(0);
+    setBatchDone(0); setBatchAutoResolved(0); setBatchPending(0); setBatchLogFailures(0);
     cancelRef.current = false;
 
     let incidents: SampledIncident[] = [];
@@ -204,21 +205,34 @@ export function ExperimentControl() {
       // null for everything else (human review pending or not applicable).
       const human_action = mode === 'ai_only' ? route.ai_recommendation : null;
 
-      try {
-        await post('/api/decisions', {
-          incident_id:       route.incident_id,
-          experiment_mode:   mode,
-          incident_features: features,
-          ai_recommendation: route.ai_recommendation,
-          ai_confidence:     route.ai_confidence,
-          routing_action:    route.routing_decision,
-          human_action,
-          final_action:      route.routing_decision,
-          ground_truth:      ground_truth,
-          resolution_time_s: resolution_time_s,
-        });
-      } catch {
-        // Non-fatal — continue processing; partial results still useful
+      const decisionPayload = {
+        incident_id:       route.incident_id,
+        experiment_mode:   mode,
+        incident_features: features,
+        ai_recommendation: route.ai_recommendation,
+        ai_confidence:     route.ai_confidence,
+        routing_action:    route.routing_decision,
+        human_action,
+        final_action:      route.routing_decision,
+        ground_truth:      ground_truth,
+        resolution_time_s: resolution_time_s,
+      };
+
+      // Retry once, then fail fast so experiment integrity is not silently compromised.
+      let logged = false;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          await post('/api/decisions', decisionPayload);
+          logged = true;
+          break;
+        } catch {
+          if (attempt === 1) await sleep(200);
+        }
+      }
+      if (!logged) {
+        setBatchLogFailures((v) => v + 1);
+        setBatchError(`Decision logging failed on incident ${i + 1}; stopping to protect experiment integrity.`);
+        break;
       }
 
       if (needsHuman) {
@@ -423,6 +437,14 @@ export function ExperimentControl() {
                       <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#E8913A' }} />
                       <span style={{ color: '#E8913A' }}>
                         {batchPending} awaiting review
+                      </span>
+                    </div>
+                  )}
+                  {batchLogFailures > 0 && (
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#E5534B' }} />
+                      <span style={{ color: '#E5534B' }}>
+                        {batchLogFailures} logging failure{batchLogFailures !== 1 ? 's' : ''}
                       </span>
                     </div>
                   )}

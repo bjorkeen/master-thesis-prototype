@@ -40,7 +40,7 @@ export function DecisionPanel({ incidentId }: Props) {
   useEffect(() => {
     if (!incidentId) { setDecision(null); setResult(null); setShowForm(false); return; }
     setLoading(true); setResult(null); setShowForm(false);
-    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 100 })
+    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 1000 })
       .then(r => {
         const list = Array.isArray(r) ? r : (r as LogResponse).decisions ?? [];
         setDecision(list.find(d => d.incident_id === incidentId) ?? null);
@@ -72,12 +72,15 @@ export function DecisionPanel({ incidentId }: Props) {
   }
 
   async function handleOverride() {
-    if (!decision || reason.trim().length < 5) return;
+    if (!decision) return;
+    const isHumanOnly = decision.experiment_mode === 'human_only';
+    const enteredReason = reason.trim();
+    if (!isHumanOnly && enteredReason.length < 5) return;
     setSubmitting(true);
     try {
       const payload: OverrideDecisionRequest = {
         new_action: newAction,
-        override_reason: reason.trim(),
+        override_reason: enteredReason || 'Human-only analyst decision',
       };
       const res = await post<OverrideDecisionResponse>(
         `/api/decisions/${decision.decision_id}/override`,
@@ -137,31 +140,39 @@ export function DecisionPanel({ incidentId }: Props) {
               <p className="text-xs mb-3" style={{ color: '#6B7A99' }}>
                 Incident <span className="font-mono" style={{ color: '#E8E9F0' }}>{decision.incident_id}</span>
               </p>
-              <div className="flex items-center gap-3 mb-5">
-                <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#6B7A99' }}>AI recommends</span>
-                {/* Large badge — most prominent element on the panel */}
-                <span className="px-3 py-1 rounded-full text-sm font-bold"
-                  style={{ backgroundColor: `${REC_COLOR[decision.ai_recommendation]}22`,
-                           color: REC_COLOR[decision.ai_recommendation],
-                           border: `1.5px solid ${REC_COLOR[decision.ai_recommendation]}` }}>
-                  {REC_LABEL[decision.ai_recommendation] ?? decision.ai_recommendation}
-                </span>
-                <span className="text-xs tabular-nums" style={{ color: '#6B7A99' }}>
-                  {(decision.ai_confidence * 100).toFixed(0)}% confidence
-                </span>
-              </div>
+              {decision.experiment_mode !== 'human_only' ? (
+                <div className="flex items-center gap-3 mb-5">
+                  <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#6B7A99' }}>AI recommends</span>
+                  {/* Large badge — most prominent element on the panel */}
+                  <span className="px-3 py-1 rounded-full text-sm font-bold"
+                    style={{ backgroundColor: `${REC_COLOR[decision.ai_recommendation]}22`,
+                             color: REC_COLOR[decision.ai_recommendation],
+                             border: `1.5px solid ${REC_COLOR[decision.ai_recommendation]}` }}>
+                    {REC_LABEL[decision.ai_recommendation] ?? decision.ai_recommendation}
+                  </span>
+                  <span className="text-xs tabular-nums" style={{ color: '#6B7A99' }}>
+                    {(decision.ai_confidence * 100).toFixed(0)}% confidence
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs mb-5" style={{ color: '#6B7A99' }}>
+                  Human-only mode: make your decision without AI recommendation cues.
+                </p>
+              )}
 
               {/* Action buttons: filled Accept is the primary CTA */}
               <div className="flex flex-wrap gap-3">
-                <button onClick={handleAccept} disabled={submitting}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-opacity"
-                  style={{ backgroundColor: '#3EBD8C', color: '#fff', opacity: submitting ? 0.5 : 1 }}>
-                  <CheckCircle size={15} /> Accept
-                </button>
+                {decision.experiment_mode !== 'human_only' && (
+                  <button onClick={handleAccept} disabled={submitting}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-opacity"
+                    style={{ backgroundColor: '#3EBD8C', color: '#fff', opacity: submitting ? 0.5 : 1 }}>
+                    <CheckCircle size={15} /> Accept
+                  </button>
+                )}
                 <button onClick={() => setShowForm(f => !f)}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold"
                   style={{ border: '1.5px solid #E8913A', color: '#E8913A', backgroundColor: 'rgba(232,145,58,0.1)' }}>
-                  <ArrowLeftRight size={15} /> Override
+                  <ArrowLeftRight size={15} /> {decision.experiment_mode === 'human_only' ? 'Choose Action' : 'Override'}
                 </button>
                 <button onClick={() => setResult({ ok: true, message: 'Incident dismissed — no action taken.' })}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold"
@@ -186,18 +197,21 @@ export function DecisionPanel({ incidentId }: Props) {
                 </select>
 
                 <label className="block text-xs mb-1" style={{ color: '#6B7A99' }}>
-                  Reason <span style={{ color: '#E5534B' }}>*</span> (min 5 characters)
+                  Reason <span style={{ color: '#E5534B' }}>*</span> ({decision.experiment_mode === 'human_only' ? 'optional notes' : 'min 5 characters'})
                 </label>
                 <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
-                  placeholder="Explain why you are overriding the AI…"
+                  placeholder={decision.experiment_mode === 'human_only'
+                    ? 'Optional note about your decision…'
+                    : 'Explain why you are overriding the AI…'}
                   className="w-full rounded-lg px-3 py-2 text-sm mb-4 resize-none outline-none"
                   style={{ backgroundColor: '#0E0F14', border: `1px solid ${B}`, color: '#E8E9F0' }} />
 
-                <button onClick={handleOverride} disabled={submitting || reason.trim().length < 5}
+                <button onClick={handleOverride}
+                  disabled={submitting || (decision.experiment_mode !== 'human_only' && reason.trim().length < 5)}
                   className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-opacity"
                   style={{ backgroundColor: '#E8913A', color: '#fff',
-                           opacity: (submitting || reason.trim().length < 5) ? 0.45 : 1 }}>
-                  {submitting ? 'Submitting…' : 'Confirm Override'}
+                           opacity: (submitting || (decision.experiment_mode !== 'human_only' && reason.trim().length < 5)) ? 0.45 : 1 }}>
+                  {submitting ? 'Submitting…' : decision.experiment_mode === 'human_only' ? 'Submit Decision' : 'Confirm Override'}
                 </button>
               </div>
             )}

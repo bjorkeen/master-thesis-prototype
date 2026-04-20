@@ -66,7 +66,7 @@ export function AnalyticsDashboard() {
   useEffect(() => {
     Promise.all([
       get<DecisionStats>('/api/decisions/stats'),
-      get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 200 }),
+      get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 1000 }),
     ])
       .then(([s, r]) => {
         setStats(s);

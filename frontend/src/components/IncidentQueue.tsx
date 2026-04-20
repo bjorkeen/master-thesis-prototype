@@ -79,6 +79,15 @@ function PendingBadge() {
   );
 }
 
+function ReviewedBadge() {
+  return (
+    <span style={{ color: '#6B7080', borderColor: '#6B7080', backgroundColor: 'rgba(107,112,128,0.12)' }}
+      className="px-2 py-0.5 rounded text-xs font-medium border whitespace-nowrap">
+      REVIEWED
+    </span>
+  );
+}
+
 // Small coloured pill for the AI recommendation (used for decided/auto-resolved rows)
 function Badge({ value }: { value: string }) {
   const c = COLOR[value] ?? '#4C8BF5';
@@ -118,7 +127,7 @@ export function IncidentQueue({ onSelect }: Props) {
 
   function fetchEntries(showSpinner = false) {
     if (showSpinner) setRefreshing(true);
-    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 200 })
+    get<LogResponse | LogEntry[]>('/api/decisions/log', { page: 1, page_size: 1000 })
       .then(r => {
         setEntries(Array.isArray(r) ? r : (r as LogResponse).decisions ?? []);
         setError(null);
@@ -206,6 +215,7 @@ export function IncidentQueue({ onSelect }: Props) {
             <tbody>
               {entries.map(entry => {
                 const pending = isPending(entry);
+                const humanOnly = entry.experiment_mode === 'human_only';
                 const sel     = selectedId === entry.incident_id;
                 const tc      = { borderColor: B };
 
@@ -223,6 +233,8 @@ export function IncidentQueue({ onSelect }: Props) {
                         ? 'rgba(76,139,245,0.15)'
                         : pending
                         ? 'rgba(232,145,58,0.05)'   // subtle amber tint for pending rows
+                        : humanOnly
+                        ? 'rgba(107,112,128,0.05)'
                         : TINT[entry.ai_recommendation],
                       outline:       sel ? '1px solid rgba(76,139,245,0.4)' : 'none',
                       outlineOffset: '-1px',
@@ -233,6 +245,8 @@ export function IncidentQueue({ onSelect }: Props) {
                       <span className="block w-2 h-2 rounded-full" style={{
                         backgroundColor: pending
                           ? '#E8913A'
+                          : humanOnly
+                          ? '#6B7080'
                           : (COLOR[entry.ai_recommendation] ?? '#6B7080'),
                       }} />
                     </td>
@@ -264,13 +278,15 @@ export function IncidentQueue({ onSelect }: Props) {
 
                     {/* Confidence */}
                     <td className="px-3 py-2.5 border-b tabular-nums" style={{ ...tc, color: '#B0B3C6' }}>
-                      {(entry.ai_confidence * 100).toFixed(0)}%
+                      {humanOnly ? '—' : `${(entry.ai_confidence * 100).toFixed(0)}%`}
                     </td>
 
                     {/* Status badge — PENDING or action badge */}
                     <td className="px-3 py-2.5 border-b" style={tc}>
                       {pending
                         ? <PendingBadge />
+                        : humanOnly
+                        ? <ReviewedBadge />
                         : <Badge value={entry.ai_recommendation} />}
                     </td>
                   </tr>

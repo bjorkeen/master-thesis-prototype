@@ -20,7 +20,7 @@ Three experimental modes are compared: AI-only, Human-only, and HITL (collaborat
 - **Storage**: In-memory (per service process) for prototype evaluation; SQLite schema ready at `data/hitl_cdt.db` via `data/db.py` + `data/create_tables.py` for production use
 
 ## Current Build Status
-ALL PHASES COMPLETE.
+Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
 
 ### Phase 1 — Data Science Foundation
 - data/generate_dataset.py — generates 3,000 synthetic incidents (60/30/10 distribution, ~32% ambiguity zone)

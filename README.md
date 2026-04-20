@@ -284,12 +284,14 @@ curl -X POST http://localhost:4000/api/route \
 | POST | /experiment/stop | End experiment, compute results |
 | GET | /experiment/results | Final experiment metrics |
 | GET | /experiment/export | Download decision log as CSV |
+| GET | /incidents/sample | Stratified incident sample (`seed` optional for reproducibility) |
 | GET | /health | Liveness check |
 
 **Override endpoint contract (`POST /decisions/{id}/override`):**
 - Request body: `{ "new_action": "auto_resolve|escalate|critical", "override_reason": "<text>", "ground_truth": "<optional>" }`
 - Response body includes: `decision_id`, `old_action`, `new_action`, `override_reason`, `cost_delta`
 - `cost_delta` = `cost(new_action) - cost(old_action)` (negative means the override reduced cost)
+- Experiment metrics and default CSV export include **resolved** decisions only (pending review rows are excluded unless `include_pending=true` is passed to export)
 
 ---
 
