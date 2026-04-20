@@ -6,7 +6,6 @@
 **University of Macedonia**, Department of Applied Informatics  
 **Author**: Gkanatsa Antonia (esd25004)  
 **Supervisor**: Prof. Konstantinos Vergidis  
-**Co-funded by**: Deloitte
 
 ---
 
