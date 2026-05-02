@@ -126,42 +126,6 @@ hitl-cdt/
 └── README.md                       # This file
 ```
 
----
-
-## Current Status
-
-### ✅ Phase 1 — Data Science Foundation (Complete)
-- [x] Synthetic dataset: 3,000 incidents, 7 features, 60/30/10 class distribution
-- [x] ~32% ambiguity zone via Gaussian noise (σ=0.10)
-- [x] RandomForest classifier (200 trees, balanced class weights)
-- [x] Model performance: 68.3% overall accuracy (by design — ambiguity zone creates challenge)
-- [x] SHAP TreeExplainer with summary + waterfall plots
-- [x] Routing configuration (thresholds: auto≥0.85, critical<0.50, SLA boost)
-- [x] Cost model (missed critical=€100, false escalation=€10)
-
-### ✅ Phase 2 — Python Microservices (Complete)
-- [x] ML Service (:8001) — predict, batch predict, SHAP explain, global importance
-- [x] Twin Service (:8002) — state tracking, SLA countdown, what-if simulation, history
-- [x] Decision Service (:8003) — 3-mode routing, decision logging, overrides, experiment lifecycle, CSV export
-- [x] Database schema defined (SQLite with PostgreSQL fallback) — services currently use in-memory storage for prototype evaluation
-
-### ✅ Phase 3 — Gateway + Frontend (Complete)
-- [x] Node.js API Gateway (:4000) — Express, Socket.io, per-service path-rewriting proxy
-- [x] React dashboard (:5173) — all 6 panels, persistent state across navigation
-- [x] IncidentQueue — live incident list with status badges and selection
-- [x] ShapExplainer — SHAP horizontal bar chart + feature table
-- [x] DecisionPanel — AI recommendation display + human override form
-- [x] TwinStatePanel — real-time pipeline gauges via WebSocket
-- [x] AnalyticsDashboard — accuracy, cost, and override charts (Recharts)
-- [x] ExperimentControl — mode selector, start/stop controls, results summary
-
-### 🔄 Phase 4 — Experiments + Thesis Write-up (In Progress)
-- [ ] Run AI-only / Human-only / HITL experiments with study participants
-- [ ] Collect subjective trust ratings (Likert scale)
-- [ ] Data analysis and thesis Chapter 6
-
----
-
 ## Quick Start
 
 ### Prerequisites
