@@ -1,0 +1,109 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    // ── Individual service tasks ──────────────────────────────────────────────
+    // Each service runs in its own terminal panel so you can see its logs live.
+
+    {
+      "label": "ML Service (port 8001)",
+      "type": "shell",
+      // Run uvicorn from the virtual environment. --app-dir points to the service folder.
+      "command": "${workspaceFolder}/.venv/bin/uvicorn main:app --app-dir ${workspaceFolder}/services/ml-service --host 0.0.0.0 --port 8001 --reload",
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",   // each task gets its own terminal tab
+        "group": "hitl-cdt"     // all tasks share the same terminal group (side by side)
+      },
+      "isBackground": true,     // VS Code won't wait for it to finish — it runs forever
+      "problemMatcher": []
+    },
+
+    {
+      "label": "Twin Service (port 8002)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/uvicorn main:app --app-dir ${workspaceFolder}/services/twin-service --host 0.0.0.0 --port 8002 --reload",
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "hitl-cdt"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+
+    {
+      "label": "Decision Service (port 8003)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/uvicorn main:app --app-dir ${workspaceFolder}/services/decision-service --host 0.0.0.0 --port 8003 --reload",
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "hitl-cdt"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+
+    {
+      "label": "API Gateway (port 4000)",
+      "type": "shell",
+      // cd into gateway/ so that node finds its node_modules folder.
+      "command": "node index.js",
+      "options": {
+        "cwd": "${workspaceFolder}/gateway"
+      },
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "hitl-cdt"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+
+    {
+      "label": "Frontend (port 5173)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "hitl-cdt"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+
+    // ── Compound task: starts everything with one command ─────────────────────
+
+    {
+      "label": "Start All HITL-CDT Services",
+      "dependsOn": [
+        "ML Service (port 8001)",
+        "Twin Service (port 8002)",
+        "Decision Service (port 8003)",
+        "API Gateway (port 4000)",
+        "Frontend (port 5173)"
+      ],
+      // "parallel" launches all five at the same time instead of one after the other.
+      "dependsOrder": "parallel",
+      "group": {
+        "kind": "build",
+        "isDefault": true    // makes Cmd+Shift+B (Mac) / Ctrl+Shift+B (Windows) run this task
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
