@@ -122,9 +122,12 @@ hitl-cdt/
 │   │   └── types/index.ts          # TypeScript interfaces for all API shapes
 │   ├── package.json
 │   └── vite.config.ts
+├── .gitignore                      # Repo root: .DS_Store, .venv, node_modules, build/, .env, …
 ├── CLAUDE.md                       # AI assistant context file
 └── README.md                       # This file
 ```
+
+Root **`.gitignore`** excludes macOS `.DS_Store`, Python caches and virtualenvs, `node_modules`, build outputs, and local environment files from version control. **`frontend/.gitignore`** and **`gateway/.gitignore`** still apply inside those packages (for example Vite `dist/`).
 
 ## Quick Start
 

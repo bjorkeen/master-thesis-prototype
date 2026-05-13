@@ -126,9 +126,12 @@ hitl-cdt/
 │   │       └── index.ts
 │   ├── package.json
 │   └── vite.config.ts
+├── .gitignore                 # Repo root: .DS_Store, .venv, node_modules, build/, .env, …
 ├── CLAUDE.md
 └── README.md
 ```
+
+Root **`.gitignore`** keeps Git clean (macOS metadata, Python caches and virtualenvs, Node `node_modules`, build outputs, local `.env`). **`frontend/.gitignore`** and **`gateway/.gitignore`** add package-specific rules (e.g. Vite `dist/`).
 
 ## Database Schema
 ### incidents table

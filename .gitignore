@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+**/.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Node (gateway, frontend, or root-level installs)
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment / secrets
+.env
+.env.local
+
+# IDE
+.idea/
+*.swp
+*.swo
