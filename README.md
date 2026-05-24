@@ -111,9 +111,9 @@ hitl-cdt/
 │   ├── src/
 │   │   ├── App.tsx                 # Root layout, sectioned sidebar, panel management
 │   │   ├── components/
-│   │   │   ├── IncidentQueue.tsx   # Incident list + progress bar + status badges
-│   │   │   ├── ShapExplainer.tsx   # SHAP horizontal bar chart
-│   │   │   ├── DecisionPanel.tsx   # AI recommendation + human override
+│   │   │   ├── IncidentQueue.tsx   # Incident list + progress bar + expandable inline detail panel
+│   │   │   ├── ShapExplainer.tsx   # SHAP horizontal bar chart (standalone + inline)
+│   │   │   ├── DecisionPanel.tsx   # AI recommendation + human override (standalone + inline)
 │   │   │   ├── TwinStatePanel.tsx  # Live pipeline state gauges
 │   │   │   ├── AnalyticsDashboard.tsx  # Accuracy/cost/override charts
 │   │   │   └── ExperimentControl.tsx   # Mode selector, progress stats, routing breakdown, start/stop/export
@@ -291,6 +291,9 @@ The default landing panel is **Experiment**. A green pulse dot appears in the si
 
 **IncidentQueue highlights:**
 - Progress bar between header and list shows reviewed / remaining / percentage for incidents requiring human review
+- **Inline detail panel** — clicking a pending incident row (in HITL / Human-only modes) expands a detail section directly below it, so the participant reviews and acts without switching tabs. HITL shows the SHAP explanation (left) alongside the Decision Panel (right); Human-only shows just the Decision Panel. ai_only rows do not expand.
+- After a successful Accept or Override, the row badge flips to REVIEWED and the **next pending incident auto-expands** — the participant flow becomes: see incident → see explanation → act → next opens, all in one view
+- A small "X" button collapses the expanded panel without acting
 - Empty state guides the user to start an experiment first
 
 ---

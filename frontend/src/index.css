@@ -15,3 +15,12 @@ body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* Inline incident-detail panel reveal (IncidentQueue expandable row) */
+@keyframes inlineDetailReveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.inline-detail-enter {
+  animation: inlineDetailReveal 0.16s ease-out;
+}

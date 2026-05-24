@@ -44,9 +44,9 @@ Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
 - data/hitl_cdt.db — SQLite database file (schema defined; not used by services at runtime — in-memory storage is sufficient for the fixed-batch experimental protocol)
 - gateway/index.js — Node.js Express :4000, http-proxy-middleware v3, Socket.io WebSocket
 - frontend/src/App.tsx — root layout, sectioned sidebar nav (SETUP/REVIEW/INSPECT/ANALYZE) with emoji icons, default panel = 'experiment', exports PanelKey type, green pulse dot when experiment active
-- frontend/src/components/IncidentQueue.tsx — incident list, progress bar (reviewed/remaining/%), status badges, select for explanation
-- frontend/src/components/ShapExplainer.tsx — SHAP horizontal bar chart, feature table
-- frontend/src/components/DecisionPanel.tsx — AI recommendation + human override form
+- frontend/src/components/IncidentQueue.tsx — incident list, progress bar (reviewed/remaining/%), status badges, expandable inline detail panel (SHAP + Decision) with auto-advance to next pending
+- frontend/src/components/ShapExplainer.tsx — SHAP horizontal bar chart, feature table (used standalone in sidebar AND inline in IncidentQueue)
+- frontend/src/components/DecisionPanel.tsx — AI recommendation + human override form; optional onActionComplete callback for the inline-queue flow
 - frontend/src/components/TwinStatePanel.tsx — live pipeline state gauges via WebSocket
 - frontend/src/components/AnalyticsDashboard.tsx — accuracy/cost/override charts (Recharts)
 - frontend/src/components/ExperimentControl.tsx — mode selector (locked during run), start/stop/export, routing breakdown cards, progress stats, CTA banner, 10s polling for reviewed count, mount-sync after page refresh
@@ -254,6 +254,20 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
 - IncidentQueue shows a progress bar between the header and the list when `reviewableCount > 0`.
   `reviewableCount` = entries where `routing_action !== 'auto_resolve'` and mode is hitl/human_only.
   `reviewedCount = reviewableCount - pendingCount` (no extra API call; data already fetched).
+- IncidentQueue has an inline expandable detail panel (the participant review workflow — no tab
+  switching). Clicking a row in hitl/human_only modes toggles `expandedIncidentId`, rendering a
+  full-width `<tr><td colSpan={9}>` below it. ai_only rows do not expand. Layout by mode:
+  hitl → two columns (ShapExplainer ~45% left, DecisionPanel ~55% right); human_only → DecisionPanel
+  only. The detail area has a blue (#4C8BF5) left-border accent, #1E1F2A background, and an "X"
+  collapse button. DecisionPanel and ShapExplainer are reused as-is (they self-fetch via incidentId).
+- DecisionPanel accepts an optional `onActionComplete(incidentId)` prop. After a successful Accept
+  or Override it shows the result + cost delta for ~900 ms, then calls the callback. IncidentQueue's
+  `handleActionComplete` then refreshes the log (badge flips to REVIEWED) and auto-expands the next
+  pending incident in display order (wrapping round). When the prop is omitted (standalone sidebar
+  DecisionPanel) behaviour is unchanged — the result card simply stays visible.
+- The standalone sidebar Decision Panel and AI Explanation tabs still work independently; the inline
+  versions are an ADDITIONAL access path, not a replacement.
+- index.css defines the `inlineDetailReveal` keyframe (`.inline-detail-enter`) for the expand fade-in.
 - TypeScript types in src/types/index.ts match the actual API response shapes:
   - RoutingResponse uses routing_decision (not routing_action), class_probabilities,
     thresholds_used, twin_context, experiment_mode

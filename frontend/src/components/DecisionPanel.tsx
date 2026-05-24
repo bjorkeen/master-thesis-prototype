@@ -18,7 +18,16 @@ import type {
 
 interface LogEntry extends Decision { anomaly_type?: string; }
 interface LogResponse { decisions: LogEntry[]; total: number; }
-export interface Props { incidentId: string | null; }
+export interface Props {
+  incidentId: string | null;
+  /**
+   * Optional callback fired after a successful Accept or Override.
+   * Used by the inline IncidentQueue flow to collapse this row, refresh the
+   * log, and auto-advance to the next pending incident. When omitted (e.g. the
+   * standalone sidebar panel) the result card simply stays visible.
+   */
+  onActionComplete?: (incidentId: string) => void;
+}
 
 const B = '#2A2B38';
 const REC_COLOR: Record<DecisionAction, string> = {
@@ -28,7 +37,7 @@ const REC_LABEL: Record<DecisionAction, string> = {
   auto_resolve: 'Auto Resolve', escalate: 'Escalate', critical: 'Critical',
 };
 
-export function DecisionPanel({ incidentId }: Props) {
+export function DecisionPanel({ incidentId, onActionComplete }: Props) {
   const { get, post } = useApi();
   const [decision,   setDecision]   = useState<LogEntry | null>(null);
   const [loading,    setLoading]    = useState(false);
@@ -74,6 +83,12 @@ export function DecisionPanel({ incidentId }: Props) {
         message: `Accepted: ${REC_LABEL[decision.ai_recommendation]}`,
         costDelta: res.cost_delta,
       });
+      // Inline-queue flow: brief pause so the participant sees the confirmation
+      // + cost delta, then hand off to advance to the next pending incident.
+      if (onActionComplete && incidentId) {
+        const id = incidentId;
+        setTimeout(() => onActionComplete(id), 900);
+      }
     } catch (e: unknown) {
       setResult({ ok: false, message: `Error: ${(e as Error).message}` });
     } finally { setSubmitting(false); }
@@ -100,6 +115,10 @@ export function DecisionPanel({ incidentId }: Props) {
         costDelta: res.cost_delta,
       });
       setShowForm(false);
+      if (onActionComplete && incidentId) {
+        const id = incidentId;
+        setTimeout(() => onActionComplete(id), 900);
+      }
     } catch (e: unknown) {
       setResult({ ok: false, message: `Error: ${(e as Error).message}` });
     } finally { setSubmitting(false); }

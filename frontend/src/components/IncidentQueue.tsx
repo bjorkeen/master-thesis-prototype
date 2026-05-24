@@ -3,9 +3,11 @@
  * Data: GET /api/decisions/log → Decision Service :8003
  * Props: onSelect(incidentId) — called when a row is clicked.
  */
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, RefreshCw, X } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
+import { DecisionPanel } from './DecisionPanel';
+import { ShapExplainer } from './ShapExplainer';
 import type { Decision, DecisionStats } from '../types';
 
 // The log endpoint flattens incident_features into the top-level doc, but we
@@ -196,6 +198,7 @@ export function IncidentQueue({ onSelect }: Props) {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedIncidentId, setExpandedIncidentId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDir,    setSortDir]    = useState<'asc' | 'desc'>('asc');
@@ -254,9 +257,46 @@ export function IncidentQueue({ onSelect }: Props) {
     }
   }
 
-  function select(entry: LogEntry) {
+  // Clicking a row selects it (for the sidebar panels) and, in the human-review
+  // modes, toggles the inline detail panel below the row. ai_only rows never
+  // expand — there is nothing for a human to act on.
+  function handleRowClick(entry: LogEntry) {
     setSelectedId(entry.incident_id);
     onSelect?.(entry.incident_id);
+
+    const canExpand =
+      entry.experiment_mode === 'hitl' || entry.experiment_mode === 'human_only';
+    if (!canExpand) return;
+
+    setExpandedIncidentId(prev =>
+      prev === entry.incident_id ? null : entry.incident_id,
+    );
+  }
+
+  // Called by the inline DecisionPanel after a successful Accept / Override:
+  //  1. refresh the log so the acted row flips to REVIEWED
+  //  2. auto-expand the next pending incident (in display order, wrapping round)
+  function handleActionComplete(completedId: string) {
+    const order = sortedEntries;
+    const startIdx = order.findIndex(e => e.incident_id === completedId);
+
+    let next: string | null = null;
+    if (startIdx !== -1) {
+      for (let i = 1; i <= order.length; i++) {
+        const cand = order[(startIdx + i) % order.length];
+        if (cand.incident_id !== completedId && isPending(cand)) {
+          next = cand.incident_id;
+          break;
+        }
+      }
+    }
+
+    setExpandedIncidentId(next);
+    if (next) {
+      setSelectedId(next);
+      onSelect?.(next);
+    }
+    fetchEntries();   // update the just-acted row's badge to REVIEWED
   }
 
   const B = '#2A2B38';
@@ -373,6 +413,9 @@ export function IncidentQueue({ onSelect }: Props) {
                 const pending = isPending(entry);
                 const humanOnly = entry.experiment_mode === 'human_only';
                 const sel     = selectedId === entry.incident_id;
+                const expanded = expandedIncidentId === entry.incident_id;
+                const canExpand =
+                  entry.experiment_mode === 'hitl' || entry.experiment_mode === 'human_only';
                 const tc      = { borderColor: B };
                 const routing = entry.routing_action;
 
@@ -383,17 +426,20 @@ export function IncidentQueue({ onSelect }: Props) {
                 const pipelineStage     = feat(entry, 'pipeline_stage') as string | undefined;
 
                 return (
-                  <tr key={entry.decision_id} onClick={() => select(entry)}
+                  <Fragment key={entry.decision_id}>
+                  <tr onClick={() => handleRowClick(entry)}
                     className="cursor-pointer"
                     style={{
-                      backgroundColor: sel
+                      backgroundColor: expanded
+                        ? 'rgba(76,139,245,0.22)'
+                        : sel
                         ? 'rgba(76,139,245,0.15)'
                         : pending
                         ? (TINT[routing] ?? 'rgba(232,145,58,0.05)')
                         : humanOnly
                         ? 'rgba(107,112,128,0.05)'
                         : TINT[entry.ai_recommendation],
-                      outline:       sel ? '1px solid rgba(76,139,245,0.4)' : 'none',
+                      outline:       (sel || expanded) ? '1px solid rgba(76,139,245,0.4)' : 'none',
                       outlineOffset: '-1px',
                     }}>
 
@@ -459,6 +505,67 @@ export function IncidentQueue({ onSelect }: Props) {
                         : <Badge value={entry.ai_recommendation} />}
                     </td>
                   </tr>
+
+                  {/* Inline detail panel — everything the analyst needs to act,
+                      rendered directly below the selected row (no tab switching). */}
+                  {expanded && canExpand && (
+                    <tr>
+                      <td colSpan={9} style={{ padding: 0, borderBottom: `1px solid ${B}` }}>
+                        <div
+                          className="inline-detail-enter"
+                          style={{
+                            borderLeft: '3px solid #4C8BF5',
+                            backgroundColor: '#1E1F2A',
+                            padding: 18,
+                          }}
+                        >
+                          {/* Mini header with collapse control */}
+                          <div className="flex items-center mb-3">
+                            <span className="text-xs font-medium" style={{ color: '#6B7A99' }}>
+                              Reviewing{' '}
+                              <span className="font-mono" style={{ color: '#4C8BF5' }}>
+                                {entry.incident_id}
+                              </span>
+                            </span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setExpandedIncidentId(null); }}
+                              title="Collapse"
+                              className="ml-auto p-1 rounded transition-colors"
+                              style={{ color: '#6B7A99' }}
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+
+                          {/* HITL: SHAP (left) + Decision (right). Human-only: Decision only. */}
+                          {entry.experiment_mode === 'hitl' ? (
+                            <div className="flex gap-4" style={{ height: 560 }}>
+                              <div style={{ flex: '0 0 45%', minWidth: 0, borderRadius: 10,
+                                            overflow: 'hidden', border: `1px solid ${B}` }}>
+                                <ShapExplainer incidentId={entry.incident_id} />
+                              </div>
+                              <div style={{ flex: '1 1 55%', minWidth: 0, borderRadius: 10,
+                                            overflow: 'hidden', border: `1px solid ${B}` }}>
+                                <DecisionPanel
+                                  incidentId={entry.incident_id}
+                                  onActionComplete={handleActionComplete}
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ height: 460, borderRadius: 10,
+                                          overflow: 'hidden', border: `1px solid ${B}` }}>
+                              <DecisionPanel
+                                incidentId={entry.incident_id}
+                                onActionComplete={handleActionComplete}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
