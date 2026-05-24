@@ -1007,12 +1007,16 @@ async def start_experiment(request: ExperimentStartRequest):
 
 
 @app.post("/experiment/stop", tags=["Experiment"])
-async def stop_experiment():
+async def stop_experiment(
+    force: bool = Query(False, description="Skip pending-review check (for demo/force-reset)")
+):
     """
     End the current experiment run and compute final evaluation metrics.
 
     After this call, /experiment/results will return the full summary.
     The decision log is preserved; you can still export it via /experiment/export.
+
+    Pass ?force=true to skip the pending-review guard (e.g. demo reset mid-run).
     """
     if not experiment["active"]:
         raise HTTPException(
@@ -1022,7 +1026,7 @@ async def stop_experiment():
 
     decisions = _current_run_decisions()
     pending_count = sum(1 for d in decisions if _is_pending_human_review(d))
-    if pending_count > 0:
+    if pending_count > 0 and not force:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Cannot stop experiment: {pending_count} incident(s) are still pending human review.",

@@ -179,6 +179,9 @@ export function ExperimentControl({ setActivePanel }: ExperimentControlProps) {
   // Ref lets the cancel button stop the loop mid-run without stale closure issues
   const cancelRef = useRef(false);
 
+  // Force-stop two-click confirmation state: first click arms it, second click fires
+  const [forceStopConfirming, setForceStopConfirming] = useState(false);
+
   // On mount: if an experiment is already active on the backend (e.g. after a page
   // refresh that wiped local React state), restore running state from the server so
   // the card reappears and polling restarts without requiring a manual Start click.
@@ -264,6 +267,13 @@ export function ExperimentControl({ setActivePanel }: ExperimentControlProps) {
     return () => { mounted = false; clearInterval(id); };
   }, [get]); // `get` is memoised in useApi — this runs once on mount
 
+  // Auto-cancel the armed confirm state after 3 s if the user does nothing
+  useEffect(() => {
+    if (!forceStopConfirming) return;
+    const t = setTimeout(() => setForceStopConfirming(false), 3000);
+    return () => clearTimeout(t);
+  }, [forceStopConfirming]);
+
   // ── Experiment start / stop ─────────────────────────────────────────────────
 
   async function handleStart() {
@@ -293,6 +303,27 @@ export function ExperimentControl({ setActivePanel }: ExperimentControlProps) {
     } catch (e: unknown) {
       setError((e as Error).message);
     } finally { setBusy(false); }
+  }
+
+  // Force-stop: two-click pattern (arm → confirm). Stops the experiment and
+  // resets the Twin so the dashboard goes back to zero for the next demo run.
+  async function handleForceStop() {
+    if (!forceStopConfirming) {
+      setForceStopConfirming(true);
+      return;
+    }
+    setForceStopConfirming(false);
+    cancelRef.current = true;
+    // Best-effort: ignore errors so the UI always resets.
+    // ?force=true bypasses the pending-review guard on the backend.
+    try { await post('/api/experiment/stop?force=true'); } catch { /* ignore */ }
+    try { await post('/api/twin/reset');                 } catch { /* ignore */ }
+    // Clear all local state so a new experiment can start immediately
+    setRunning(false); setRunInfo(null); setResults(null); setError(null);
+    setBatchRunning(false); setBatchComplete(false); setBatchError(null);
+    setBatchDone(0); setBatchTotal(0); setBatchAutoResolved(0);
+    setBatchPending(0); setBatchEscalated(0); setBatchCritical(0);
+    setBatchLogFailures(0); setReviewedCount(0);
   }
 
   // ── Batch runner ────────────────────────────────────────────────────────────
@@ -428,11 +459,30 @@ export function ExperimentControl({ setActivePanel }: ExperimentControlProps) {
     <div className="flex flex-col h-full" style={{ backgroundColor: '#0E0F14', color: '#E8E9F0' }}>
 
       {/* Header */}
-      <div className="px-6 py-4 border-b flex-shrink-0" style={{ borderColor: B, backgroundColor: '#16171E' }}>
-        <h2 className="text-base font-semibold">Experiment Control</h2>
-        <p className="text-xs mt-0.5" style={{ color: '#6B7A99' }}>
-          Compare AI-only, Human-only, and HITL decision modes
-        </p>
+      <div className="px-6 py-4 border-b flex-shrink-0 flex items-center gap-4"
+        style={{ borderColor: B, backgroundColor: '#16171E' }}>
+        <div className="flex-1">
+          <h2 className="text-base font-semibold">Experiment Control</h2>
+          <p className="text-xs mt-0.5" style={{ color: '#6B7A99' }}>
+            Compare AI-only, Human-only, and HITL decision modes
+          </p>
+        </div>
+        {/* Force Stop — utility only; subtle until armed */}
+        {running && (
+          <button
+            onClick={handleForceStop}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{
+              border:           `1px solid ${forceStopConfirming ? '#E5534B' : '#3A3B48'}`,
+              color:            forceStopConfirming ? '#E5534B' : '#4A4D60',
+              backgroundColor:  forceStopConfirming ? 'rgba(229,83,75,0.08)' : 'transparent',
+              flexShrink:       0,
+            }}
+          >
+            <Square size={10} fill={forceStopConfirming ? '#E5534B' : '#4A4D60'} />
+            {forceStopConfirming ? 'Confirm stop?' : 'Force Stop'}
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-6">
