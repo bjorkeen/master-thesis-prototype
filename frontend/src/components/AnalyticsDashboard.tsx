@@ -126,7 +126,7 @@ export function AnalyticsDashboard() {
         {loading && <Centered>Loading…</Centered>}
         {!loading && error && <Centered style={{ color: '#E5534B' }}>Error: {error}</Centered>}
         {!loading && !error && !hasData && (
-          <Centered>No experiment data yet — run an experiment first.</Centered>
+          <Centered>Run and complete an experiment to view analytics.</Centered>
         )}
 
         {hasData && stats && (

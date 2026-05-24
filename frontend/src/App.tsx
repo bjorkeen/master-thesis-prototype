@@ -7,21 +7,14 @@
  *   │                 │  (one of the 6 panels)        │
  *   └─────────────────────────────────────────────────┘
  *
- * The sidebar links switch which panel is visible.
- * Twin state arrives via WebSocket and is passed down to panels that need it.
+ * Sidebar items are grouped into labelled sections matching the
+ * participant's task flow: Setup → Review → Inspect → Analyze.
+ * All 6 panels are always mounted; inactive ones are hidden with
+ * display:none to preserve component state across navigation.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Inbox,
-  Brain,
-  CheckSquare,
-  Activity,
-  BarChart2,
-  FlaskConical,
-  Wifi,
-  WifiOff,
-} from 'lucide-react';
+import { Wifi, WifiOff } from 'lucide-react';
 
 import { useWebSocket } from './hooks/useWebSocket';
 import { useApi } from './hooks/useApi';
@@ -33,29 +26,56 @@ import { AnalyticsDashboard} from './components/AnalyticsDashboard';
 import { ExperimentControl } from './components/ExperimentControl';
 
 // ---------------------------------------------------------------------------
-// Sidebar navigation items
+// Navigation structure
 // ---------------------------------------------------------------------------
-type PanelKey = 'queue' | 'shap' | 'decision' | 'twin' | 'analytics' | 'experiment';
+export type PanelKey = 'queue' | 'shap' | 'decision' | 'twin' | 'analytics' | 'experiment';
 
-const NAV_ITEMS: { key: PanelKey; label: string; Icon: React.ElementType }[] = [
-  { key: 'queue',      label: 'Incident Queue',   Icon: Inbox        },
-  { key: 'shap',       label: 'AI Explanation',   Icon: Brain        },
-  { key: 'decision',   label: 'Decision Panel',   Icon: CheckSquare  },
-  { key: 'twin',       label: 'Digital Twin',     Icon: Activity     },
-  { key: 'analytics',  label: 'Analytics',        Icon: BarChart2    },
-  { key: 'experiment', label: 'Experiment',       Icon: FlaskConical },
+type NavItem    = { key: PanelKey; label: string; emoji: string };
+type NavSection = { label: string; items: NavItem[] };
+
+// Ordered to match the participant task flow: setup first, analyze last.
+const NAV_SECTIONS: NavSection[] = [
+  {
+    label: 'SETUP',
+    items: [
+      { key: 'experiment', label: 'Experiment',    emoji: '🧪' },
+    ],
+  },
+  {
+    label: 'REVIEW',
+    items: [
+      { key: 'queue',    label: 'Incident Queue', emoji: '📥' },
+      { key: 'decision', label: 'Decision Panel', emoji: '📋' },
+    ],
+  },
+  {
+    label: 'INSPECT',
+    items: [
+      { key: 'shap', label: 'AI Explanation', emoji: '💡' },
+      { key: 'twin', label: 'Digital Twin',   emoji: '🔄' },
+    ],
+  },
+  {
+    label: 'ANALYZE',
+    items: [
+      { key: 'analytics', label: 'Analytics', emoji: '📊' },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 export default function App() {
-  const [activePanel, setActivePanel] = useState<PanelKey>('queue');
+  // Default to 'experiment' so participants land on the setup page first.
+  const [activePanel, setActivePanel] = useState<PanelKey>('experiment');
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const { twinState, connected } = useWebSocket();
   const { get } = useApi();
   const [experimentCtx, setExperimentCtx] = useState<{ mode: string; active: boolean } | null>(null);
 
+  // Poll the gateway health endpoint to know if an experiment is currently active.
+  // Used for: the green running dot on the sidebar, and the human_only panel lock.
   useEffect(() => {
     let mounted = true;
     async function pollCtx() {
@@ -71,11 +91,10 @@ export default function App() {
     return () => { mounted = false; clearInterval(id); };
   }, [get]);
 
+  // In human_only mode, hide AI Explanation and Analytics (they show AI outputs).
   const aiPanelsLocked = experimentCtx?.active && experimentCtx.mode === 'human_only';
-  const visibleNavItems = useMemo(
-    () => aiPanelsLocked
-      ? NAV_ITEMS.filter(({ key }) => key !== 'shap' && key !== 'analytics')
-      : NAV_ITEMS,
+  const lockedKeys = useMemo(
+    () => aiPanelsLocked ? new Set<PanelKey>(['shap', 'analytics']) : new Set<PanelKey>(),
     [aiPanelsLocked]
   );
 
@@ -85,10 +104,14 @@ export default function App() {
     }
   }, [aiPanelsLocked, activePanel]);
 
+  const experimentRunning = experimentCtx?.active ?? false;
+
   // All panels are always mounted; only the active one is visible.
   // This preserves component state (e.g. a running experiment) across navigation.
   function panelStyle(key: PanelKey): React.CSSProperties {
-    return activePanel === key ? { display: 'flex', flexDirection: 'column', height: '100%' } : { display: 'none' };
+    return activePanel === key
+      ? { display: 'flex', flexDirection: 'column', height: '100%' }
+      : { display: 'none' };
   }
 
   return (
@@ -111,30 +134,55 @@ export default function App() {
           </p>
         </div>
 
-        {/* Nav links */}
-        <nav className="flex-1 py-4 space-y-0.5 px-2">
-          {visibleNavItems.map(({ key, label, Icon }) => {
-            const active = activePanel === key;
+        {/* Sectioned nav links */}
+        <nav className="flex-1 py-2 px-2 overflow-y-auto">
+          {NAV_SECTIONS.map(section => {
+            const visibleItems = section.items.filter(({ key }) => !lockedKeys.has(key));
+            if (visibleItems.length === 0) return null;
             return (
-              <button
-                key={key}
-                onClick={() => setActivePanel(key)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                style={{
-                  backgroundColor: active ? 'rgba(76,139,245,0.15)' : 'transparent',
-                  color: active ? '#4C8BF5' : '#B0B3C6',
-                }}
-              >
-                <Icon size={16} />
-                {label}
-              </button>
+              <div key={section.label}>
+                {/* Section label */}
+                <p
+                  className="text-xs uppercase tracking-wide mt-3 mb-1 px-3"
+                  style={{ color: '#4A4D60', letterSpacing: '0.07em' }}
+                >
+                  {section.label}
+                </p>
+
+                {visibleItems.map(({ key, label, emoji }) => {
+                  const active = activePanel === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setActivePanel(key)}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                      style={{
+                        backgroundColor: active ? 'rgba(76,139,245,0.15)' : 'transparent',
+                        color: active ? '#4C8BF5' : '#B0B3C6',
+                      }}
+                    >
+                      <span className="text-base leading-none">{emoji}</span>
+                      <span className="flex-1 text-left">{label}</span>
+                      {/* Green pulse dot — visible only on Experiment when running */}
+                      {key === 'experiment' && experimentRunning && (
+                        <span
+                          className="w-2 h-2 rounded-full animate-pulse"
+                          style={{ backgroundColor: '#3EBD8C', flexShrink: 0 }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
 
         {aiPanelsLocked && (
-          <div className="mx-3 mb-3 px-2.5 py-2 rounded-md text-[11px]"
-            style={{ color: '#E8913A', backgroundColor: 'rgba(232,145,58,0.12)', border: '1px solid rgba(232,145,58,0.35)' }}>
+          <div
+            className="mx-3 mb-3 px-2.5 py-2 rounded-md text-[11px]"
+            style={{ color: '#E8913A', backgroundColor: 'rgba(232,145,58,0.12)', border: '1px solid rgba(232,145,58,0.35)' }}
+          >
             Human-only mode active: AI Explanation and Analytics panels are hidden.
           </div>
         )}
@@ -176,7 +224,8 @@ export default function App() {
           </div>
         )}
         <div style={panelStyle('experiment')}>
-          <ExperimentControl />
+          {/* setActivePanel is passed so the CTA button inside can navigate to the queue */}
+          <ExperimentControl setActivePanel={setActivePanel} />
         </div>
       </main>
 

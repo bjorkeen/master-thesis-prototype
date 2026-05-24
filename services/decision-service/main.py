@@ -435,9 +435,32 @@ def _is_pending_human_review(doc: dict) -> bool:
     )
 
 
+async def _notify_twin_arrived(incident_id: str, severity: str) -> None:
+    """
+    Best-effort Twin notification that one incident has entered the queue.
+    Called when a pending (escalate / critical) decision is first logged so the
+    twin tracks it as an open incident even before the analyst acts.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{TWIN_SERVICE_URL}/state/event",
+                json={
+                    "event_type": "arrive",
+                    "incident_id": incident_id,
+                    "severity": severity,
+                },
+            )
+    except Exception:
+        pass   # best-effort, don't block API responses
+
+
 async def _notify_twin_resolved(incident_id: str, severity: str) -> None:
     """
     Best-effort Twin notification that one incident is now fully resolved.
+    `severity` must match what was sent in the corresponding arrive event
+    (i.e. the routing_action, NOT the final_action) so the twin decrements
+    the right counter (open_critical vs open_escalated).
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -759,11 +782,22 @@ async def log_decision(record: DecisionRecord):
     decision_index[decision_id] = len(decision_log)
     decision_log.append(doc)
 
-    # Notify Twin only when this record is fully resolved (not pending review).
+    # Notify Twin of the incident's status:
+    #   - Non-pending (auto_resolve or ai_only): arrive was already sent from /route,
+    #     so send the matching resolve now to keep queue_depth balanced.
+    #   - Pending human review (escalate/critical in hitl/human_only): /route
+    #     deliberately skips the arrive to avoid SLA distortion during fast batch
+    #     runs, so we send it here — after the decision is logged — so the twin
+    #     shows the true number of incidents waiting for analyst action.
     if not _is_pending_human_review(doc):
         await _notify_twin_resolved(
             incident_id=record.incident_id,
             severity=record.final_action,
+        )
+    else:
+        await _notify_twin_arrived(
+            incident_id=record.incident_id,
+            severity=record.routing_action,   # escalate or critical
         )
 
     return DecisionResponse(
@@ -831,10 +865,13 @@ async def override_decision(decision_id: str, override: OverrideRequest):
     doc["cost"]              = new_cost
 
     # If this incident was pending human review, it is now fully resolved.
+    # Use routing_action (not final_action) so the resolve matches the arrive
+    # event that was sent when the row was first logged — the twin decrements
+    # open_escalated for "escalate" and open_critical for "critical".
     if was_pending:
         await _notify_twin_resolved(
             incident_id=doc["incident_id"],
-            severity=doc["final_action"],
+            severity=doc["routing_action"],
         )
 
     return OverrideResponse(

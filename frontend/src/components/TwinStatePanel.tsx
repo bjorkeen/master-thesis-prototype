@@ -95,8 +95,8 @@ export function TwinStatePanel({ twinState: ts, connected }: Props) {
 
         {/* Null state */}
         {!ts && (
-          <div className="h-full flex items-center justify-center text-sm" style={{ color: '#6B7080' }}>
-            Waiting for twin state data…
+          <div className="h-full flex items-center justify-center text-sm text-center px-8" style={{ color: '#6B7080' }}>
+            Start an experiment to see the live pipeline state.
           </div>
         )}
 

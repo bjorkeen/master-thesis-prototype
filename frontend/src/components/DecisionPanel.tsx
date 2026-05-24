@@ -115,7 +115,7 @@ export function DecisionPanel({ incidentId }: Props) {
 
       <div className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5">
         {/* Empty / loading / not-found states */}
-        {!incidentId && <Centered>Select an incident from the queue to make a decision.</Centered>}
+        {!incidentId && <Centered>Select an incident from the Incident Queue to view AI recommendations.</Centered>}
         {incidentId && loading && <Centered>Loading…</Centered>}
         {incidentId && !loading && !decision && !result && (
           <Centered>No routing decision found for this incident — run POST /route first.</Centered>

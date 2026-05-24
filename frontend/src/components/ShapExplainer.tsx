@@ -116,7 +116,7 @@ export function ShapExplainer({ incidentId }: Props) {
         {/* Empty state */}
         {!incidentId && (
           <div className="h-full flex items-center justify-center text-sm text-center px-8" style={{ color: '#6B7080' }}>
-            Select an incident from the queue to see its AI explanation.
+            Select an incident to view its SHAP explanation.
           </div>
         )}
 

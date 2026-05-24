@@ -38,7 +38,8 @@ Three experimental modes are compared:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    React Frontend (:5173)                   │
-│  IncidentQueue · ShapExplainer · DecisionPanel · TwinState  │
+│  Experiment · IncidentQueue · DecisionPanel · AIExplain     │
+│  DigitalTwin · Analytics  (sectioned sidebar navigation)    │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP + WebSocket
 ┌──────────────────────────┴────────────────────────────────┐
@@ -108,14 +109,14 @@ hitl-cdt/
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx                 # Root layout, sidebar, panel management
+│   │   ├── App.tsx                 # Root layout, sectioned sidebar, panel management
 │   │   ├── components/
-│   │   │   ├── IncidentQueue.tsx   # Incident list with status badges
+│   │   │   ├── IncidentQueue.tsx   # Incident list + progress bar + status badges
 │   │   │   ├── ShapExplainer.tsx   # SHAP horizontal bar chart
 │   │   │   ├── DecisionPanel.tsx   # AI recommendation + human override
 │   │   │   ├── TwinStatePanel.tsx  # Live pipeline state gauges
 │   │   │   ├── AnalyticsDashboard.tsx  # Accuracy/cost/override charts
-│   │   │   └── ExperimentControl.tsx   # Mode selector, start/stop, results
+│   │   │   └── ExperimentControl.tsx   # Mode selector, progress stats, routing breakdown, start/stop/export
 │   │   ├── hooks/
 │   │   │   ├── useApi.ts           # Typed fetch wrapper
 │   │   │   └── useWebSocket.ts     # Socket.io twin state subscription
@@ -260,9 +261,37 @@ curl -X POST http://localhost:4000/api/route \
 - Request body: `{ "new_action": "auto_resolve|escalate|critical", "override_reason": "<text>", "ground_truth": "<optional>" }`
 - Response body includes: `decision_id`, `old_action`, `new_action`, `override_reason`, `cost_delta`
 - `cost_delta` = `cost(new_action) - cost(old_action)` (negative means the override reduced cost)
+- When a pending decision is overridden, a Twin `resolve` event is sent using `routing_action` as the severity (matching the original `arrive` event severity), so queue counters decrement correctly.
 - Experiment metrics and default CSV export include **resolved** decisions only (pending review rows are excluded unless `include_pending=true` is passed to export)
 - `POST /route` and `POST /decisions` require an **active** experiment run
 - Protocol lock: sampling is server-enforced to `max_incidents_per_experiment` and configured seed
+
+---
+
+## Frontend UI
+
+The React frontend has a **sectioned sidebar** navigation with emoji icons, organised into four workflow stages:
+
+| Section | Panels | Purpose |
+|---------|--------|---------|
+| SETUP | 🧪 Experiment | Choose mode, run batch, view progress stats and routing breakdown |
+| REVIEW | 📥 Incident Queue, 📋 Decision Panel | Review pending incidents, accept or override AI recommendations |
+| INSPECT | 💡 AI Explanation, 🔄 Digital Twin | Understand SHAP feature contributions; monitor live pipeline state |
+| ANALYZE | 📊 Analytics | Post-experiment accuracy, cost, and override charts |
+
+The default landing panel is **Experiment**. A green pulse dot appears in the sidebar next to "Experiment" whenever a run is active.
+
+**ExperimentControl highlights:**
+- Mode selector is locked (greyed out) while a run is in progress
+- After the batch completes, shows a "Go to queue →" CTA banner when human-review incidents remain
+- Routing breakdown cards show how many incidents were auto-resolved / escalated / critical (confidence-based, regardless of mode)
+- "Reviewed" count polls `/api/decisions/log` every 10 s and counts rows where `human_action != null AND routing_action != 'auto_resolve'` (accepts and overrides both count)
+- Page refresh during a live run restores all counters from backend state on mount
+- Export CSV and Stop Experiment buttons are visible while a run is active
+
+**IncidentQueue highlights:**
+- Progress bar between header and list shows reviewed / remaining / percentage for incidents requiring human review
+- Empty state guides the user to start an experiment first
 
 ---
 

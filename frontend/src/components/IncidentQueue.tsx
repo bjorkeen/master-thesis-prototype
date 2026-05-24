@@ -231,6 +231,16 @@ export function IncidentQueue({ onSelect }: Props) {
   const pendingCount = entries.filter(isPending).length;
   const mode         = entries[0]?.experiment_mode;
 
+  // Progress tracking for HITL / human_only modes
+  const reviewableEntries = entries.filter(e =>
+    e.routing_action !== 'auto_resolve' &&
+    (e.experiment_mode === 'hitl' || e.experiment_mode === 'human_only')
+  );
+  const reviewableCount = reviewableEntries.length;
+  const reviewedCount   = reviewableCount - pendingCount;
+  const reviewPct       = reviewableCount > 0 ? Math.round((reviewedCount / reviewableCount) * 100) : 0;
+  const showProgress    = reviewableCount > 0;
+
   const sortedEntries = useMemo(() => {
     if (!sortColumn) return entries;
     return [...entries].sort((a, b) => compareEntries(a, b, sortColumn, sortDir));
@@ -278,6 +288,28 @@ export function IncidentQueue({ onSelect }: Props) {
         </button>
       </div>
 
+      {/* Progress indicator — visible in HITL / human_only modes with pending incidents */}
+      {showProgress && (
+        <div className="px-6 py-3 flex-shrink-0" style={{ borderBottom: `1px solid ${B}`, backgroundColor: '#16171E' }}>
+          <p className="text-xs mb-2" style={{ color: '#6B7A99' }}>
+            Showing {reviewableCount} incident{reviewableCount !== 1 ? 's' : ''} requiring review
+            {' · '}
+            <span style={{ color: '#3EBD8C' }}>{reviewedCount} reviewed</span>
+            {' · '}
+            <span style={{ color: '#E8913A' }}>{pendingCount} remaining</span>
+          </p>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 rounded-full overflow-hidden" style={{ height: 5, backgroundColor: '#0E0F14' }}>
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{ width: `${reviewPct}%`, backgroundColor: '#3EBD8C' }}
+              />
+            </div>
+            <span className="text-xs tabular-nums shrink-0" style={{ color: '#6B7A99' }}>{reviewPct}%</span>
+          </div>
+        </div>
+      )}
+
       {/* States */}
       {loading && (
         <div className="flex-1 flex items-center justify-center text-sm" style={{ color: '#6B7080' }}>
@@ -290,8 +322,8 @@ export function IncidentQueue({ onSelect }: Props) {
         </div>
       )}
       {!loading && !error && entries.length === 0 && (
-        <div className="flex-1 flex items-center justify-center text-sm" style={{ color: '#6B7080' }}>
-          No decisions logged — start an experiment and run incidents to populate the queue.
+        <div className="flex-1 flex items-center justify-center text-sm text-center px-8" style={{ color: '#6B7080' }}>
+          No incidents loaded. Start an experiment from the Experiment page to begin.
         </div>
       )}
 
