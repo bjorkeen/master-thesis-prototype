@@ -990,6 +990,12 @@ async def start_experiment(request: ExperimentStartRequest):
 
     run_id = _new_id()
 
+    # Clean slate: wipe the in-memory decision store so this run cannot inherit
+    # or mix with decisions from any previous run. Export the previous run
+    # (GET /experiment/export) before starting a new one if you need its data.
+    decision_log.clear()
+    decision_index.clear()
+
     experiment["active"]         = True
     experiment["run_id"]         = run_id
     experiment["mode"]           = request.mode
@@ -1056,10 +1062,10 @@ async def stop_experiment(
 
     experiment["results"] = results.model_dump()
 
-    # Freeze the run context after completion so post-stop calls cannot
-    # accidentally append more rows to the finished run_id.
-    experiment["run_id"] = None
-
+    # Keep run_id after stopping so post-stop reads (analytics, export) still
+    # resolve to the just-completed run. New writes are already blocked by the
+    # active=False guard in /route, /decisions, and /decisions/{id}/override,
+    # and the next /experiment/start wipes the log for a clean slate.
     return {
         "message": f"Experiment {experiment['run_id']} stopped.",
         "results": experiment["results"],

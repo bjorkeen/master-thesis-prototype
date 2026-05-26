@@ -63,21 +63,38 @@ export function AnalyticsDashboard() {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
 
+  // Poll every 5 s so the dashboard always reflects the CURRENT run. Without
+  // this it would only fetch once on mount (all panels stay mounted in App.tsx),
+  // showing stale data from a previous run or an empty state after a new start.
   useEffect(() => {
-    get<DecisionStats>('/api/decisions/stats')
-      .then(async (s) => {
+    let mounted = true;
+
+    async function fetchAnalytics() {
+      try {
+        const s = await get<DecisionStats>('/api/decisions/stats');
+        if (!mounted) return;
         setStats(s);
         if (!s.run_id) {
           setDecisions([]);
+          setError(null);
           return;
         }
         const r = await get<LogResponse | LogEntry[]>('/api/decisions/log', {
           page: 1, page_size: 1000, run_id: s.run_id,
         });
+        if (!mounted) return;
         setDecisions(Array.isArray(r) ? r : (r as LogResponse).decisions ?? []);
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+        setError(null);
+      } catch (e) {
+        if (mounted) setError((e as Error).message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    fetchAnalytics();
+    const id = setInterval(fetchAnalytics, 5000);
+    return () => { mounted = false; clearInterval(id); };
   }, [get]);
 
   // Chart 1: count of decisions per action type (from stats.cost_breakdown)
