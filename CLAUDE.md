@@ -186,8 +186,8 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - POST /decisions/{id}/override — records human decision update for the active run only; sends Twin `resolve` event using `routing_action` (not `final_action`) as the severity so counters match the original `arrive` event
 - GET /decisions/log?page=1&page_size=20&mode=hitl&run_id=X — paginated decision history
 - GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; returns cost_breakdown (not by_action)
-- POST /experiment/start — input: {mode, incident_count} → begins new run, resets Twin
-- POST /experiment/stop — ends run, computes final ExperimentResults
+- POST /experiment/start — input: {mode, incident_count} → begins new run, resets Twin, and **wipes the in-memory `decision_log` + `decision_index`** (clean slate per run; export the previous run first if needed)
+- POST /experiment/stop — ends run (sets `active=False`), computes final ExperimentResults. **Keeps `experiment["run_id"]`** so post-stop analytics/export still resolve to the completed run; new writes are blocked by the `active=False` guard in /route, /decisions, and /decisions/{id}/override
 - GET /experiment/results — returns ExperimentResults for last completed run
 - GET /experiment/export?run_id=X — streams decision log as CSV download
 - GET /incidents/sample?count=100&seed=42 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); protocol lock enforces count and seed
@@ -236,6 +236,10 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
   The component zips them internally into {feature, value, display} objects for the chart.
 - AnalyticsDashboard reads stats.cost_breakdown (not by_action) for the decision
   distribution chart. cost_breakdown is keyed by action with {count, total_cost} per entry.
+- AnalyticsDashboard polls GET /api/decisions/stats every 5 s (with a mounted guard). Without the
+  poll it would only fetch once on mount — and because all panels stay mounted in App.tsx, it would
+  show stale data after a new experiment starts. Backend clean-slate-on-start (decision_log wiped)
+  + this 5 s poll = analytics always reflects the CURRENT run and zeroes immediately on restart.
 - ExperimentControl includes a batch incident runner: after starting an experiment, the
   user clicks "Load & Run Incidents" to fetch a stratified sample via GET /incidents/sample
   using the protocol-locked count/seed,

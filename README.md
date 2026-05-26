@@ -250,8 +250,8 @@ curl -X POST http://localhost:4000/api/route \
 | GET | /decisions/incident/{id} | Latest logged row (with features) for one incident ID |
 | GET | /decisions/log | Paginated decision history |
 | GET | /decisions/stats | Accuracy, cost, timing metrics |
-| POST | /experiment/start | Begin experiment run |
-| POST | /experiment/stop | End experiment, compute results |
+| POST | /experiment/start | Begin experiment run (wipes the in-memory decision log — clean slate) |
+| POST | /experiment/stop | End experiment, compute results (keeps `run_id` so post-stop reads still resolve) |
 | GET | /experiment/results | Final experiment metrics |
 | GET | /experiment/export | Download decision log as CSV |
 | GET | /incidents/sample | Stratified incident sample (protocol-locked `count` and `seed`) |
@@ -265,6 +265,7 @@ curl -X POST http://localhost:4000/api/route \
 - Experiment metrics and default CSV export include **resolved** decisions only (pending review rows are excluded unless `include_pending=true` is passed to export)
 - `POST /route` and `POST /decisions` require an **active** experiment run
 - Protocol lock: sampling is server-enforced to `max_incidents_per_experiment` and configured seed
+- **Clean slate per run:** `/experiment/start` clears the in-memory decision store, so historical runs are not queryable after a new run starts. Export the previous run's CSV (`/experiment/export`) before starting the next one if you need its data. The Analytics dashboard polls every 5 s and resets to the empty state automatically when a fresh run begins.
 
 ---
 
