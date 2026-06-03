@@ -136,14 +136,28 @@ Root **`.gitignore`** excludes macOS `.DS_Store`, Python caches and virtualenvs,
 - Python 3.11+
 - Node.js 20+
 
-### 1. Generate the dataset (first time only)
+### 0. Set up Python virtual environment and install dependencies (first time only)
 ```bash
-python data/generate_dataset.py   # → data/incidents.csv
-python data/train_model.py        # → rf_model.joblib + SHAP plots
-python data/create_tables.py      # → data/hitl_cdt.db
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On macOS/Linux; on Windows use: .venv\Scripts\activate
+
+# Install Python dependencies (shared across data scripts + all 3 services)
+pip install -r requirements.txt
+
+# Install Node.js dependencies for gateway and frontend
+cd gateway && npm install && cd ..
+cd frontend && npm install && cd ..
 ```
 
-### 2. Start the Python services (3 terminals)
+### 1. Generate the dataset and train model (first time only)
+```bash
+python data/generate_dataset.py   # → data/incidents.csv (3,000 incidents)
+python data/train_model.py        # → rf_model.joblib + SHAP plots + encoders
+python data/create_tables.py      # → data/hitl_cdt.db (SQLite schema)
+```
+
+### 2. Start the Python services (3 terminals, with venv activated)
 ```bash
 # Terminal 1 — ML Service
 cd services/ml-service && uvicorn main:app --port 8001
@@ -165,7 +179,7 @@ cd gateway && node index.js
 
 ### 4. Start the frontend
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend && npm run dev
 # → http://localhost:5173
 ```
 
@@ -266,6 +280,18 @@ curl -X POST http://localhost:4000/api/route \
 - `POST /route` and `POST /decisions` require an **active** experiment run
 - Protocol lock: sampling is server-enforced to `max_incidents_per_experiment` and configured seed
 - **Clean slate per run:** `/experiment/start` clears the in-memory decision store, so historical runs are not queryable after a new run starts. Export the previous run's CSV (`/experiment/export`) before starting the next one if you need its data. The Analytics dashboard polls every 5 s and resets to the empty state automatically when a fresh run begins.
+
+---
+
+## Implementation Notes & Fixes
+
+### Pandas 3.0 Compatibility
+- **Issue:** Pandas 3.0+ uses `StringDtype` instead of `object` dtype for string columns, breaking the categorical feature detection in `data/train_model.py`.
+- **Fix Applied:** Updated feature encoding logic to detect both `object` and `str` dtypes. The `OrdinalEncoder.fit_transform()` output is now properly converted back to a DataFrame before assignment.
+
+### Dependency Installation
+- **Python Services:** All FastAPI services require `fastapi`, `uvicorn`, `httpx`, `pyyaml`, and `python-multipart`. Additionally, the ML service requires `numpy`, `pandas`, `scikit-learn`, `joblib`, and `shap`.
+- **Installation:** A root-level `requirements.txt` has been created to consolidate common dependencies.
 
 ---
 

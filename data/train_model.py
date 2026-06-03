@@ -68,6 +68,9 @@ TARGET_COL = "label"   # 'auto_resolve' | 'escalate' | 'critical'
 X = df[FEATURE_COLS].copy()
 y = df[TARGET_COL].copy()
 
+# Ensure numeric column is float
+X["affected_records_pct"] = X["affected_records_pct"].astype(float)
+
 print(f"\n  Feature columns  : {FEATURE_COLS}")
 print(f"  Target column    : {TARGET_COL}")
 print(f"\n  Class distribution:")
@@ -88,7 +91,8 @@ print("STEP 2 – Encoding features")
 print("=" * 60)
 
 # Identify categorical columns (everything except the numeric 'affected_records_pct')
-CATEGORICAL_COLS = [c for c in FEATURE_COLS if X[c].dtype == object]
+# Note: pandas 3.0+ uses StringDtype, so check for both 'object' and 'str' dtype
+CATEGORICAL_COLS = [c for c in FEATURE_COLS if X[c].dtype in (object, 'string', 'str') or str(X[c].dtype) == 'string']
 print(f"  Categorical features being encoded: {CATEGORICAL_COLS}")
 print(f"  Numeric features left as-is       : ['affected_records_pct']")
 
@@ -100,7 +104,15 @@ feature_encoder = OrdinalEncoder(
     handle_unknown="use_encoded_value",
     unknown_value=-1,
 )
-X[CATEGORICAL_COLS] = feature_encoder.fit_transform(X[CATEGORICAL_COLS])
+# fit_transform returns numpy array, so convert back to DataFrame
+encoded_array = feature_encoder.fit_transform(X[CATEGORICAL_COLS])
+# Assign encoded values back as float64 (not object) to ensure sklearn compatibility
+X_encoded = X.copy()
+for i, col in enumerate(CATEGORICAL_COLS):
+    X_encoded[col] = encoded_array[:, i].astype(float)
+
+# Use the encoded version for training
+X = X_encoded
 
 print("  Done. Sample of encoded X:")
 print(X.head(3).to_string())
