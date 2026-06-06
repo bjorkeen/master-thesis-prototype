@@ -6,7 +6,7 @@
  * Dismiss → local only
  */
 import { useEffect, useState } from 'react';
-import { CheckCircle, ArrowLeftRight, XCircle, AlertTriangle } from 'lucide-react';
+import { CheckCircle, ArrowLeftRight, XCircle, AlertTriangle, Lock } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import type {
   Decision,
@@ -27,6 +27,35 @@ export interface Props {
    * standalone sidebar panel) the result card simply stays visible.
    */
   onActionComplete?: (incidentId: string) => void;
+  /**
+   * Force a read-only view (no Accept / Override / Dismiss). The inline queue
+   * passes this for incidents that have already been reviewed so participants
+   * can see what they decided without being able to change it (BUG 2). When
+   * omitted, the panel decides for itself from the fetched decision: a decision
+   * is only editable while it is still pending human review.
+   */
+  readOnly?: boolean;
+}
+
+// A decision can only be acted on while it is still pending human review:
+// it was routed to a human (not auto-resolved) and no human_action exists yet.
+// Everything else — already reviewed, auto-resolved, or ai_only — is read-only.
+function isStillActionable(d: LogEntry): boolean {
+  return (
+    d.human_action == null &&
+    d.routing_action !== 'auto_resolve' &&
+    (d.experiment_mode === 'hitl' || d.experiment_mode === 'human_only')
+  );
+}
+
+// Plain-English summary of what was already decided, for the read-only view.
+function describeOutcome(d: LogEntry): { verb: string; action: string } {
+  if (d.experiment_mode === 'ai_only') return { verb: 'AI decided', action: d.final_action };
+  if (d.routing_action === 'auto_resolve') return { verb: 'Auto-resolved as', action: d.final_action };
+  if (d.experiment_mode === 'human_only') return { verb: 'You decided', action: d.human_action ?? d.final_action };
+  // HITL human review: distinguish accepting the AI from overriding it.
+  if (d.human_override_to != null) return { verb: 'You overrode to', action: d.human_override_to };
+  return { verb: 'You accepted', action: d.human_action ?? d.final_action };
 }
 
 const B = '#2A2B38';
@@ -37,7 +66,7 @@ const REC_LABEL: Record<DecisionAction, string> = {
   auto_resolve: 'Auto Resolve', escalate: 'Escalate', critical: 'Critical',
 };
 
-export function DecisionPanel({ incidentId, onActionComplete }: Props) {
+export function DecisionPanel({ incidentId, onActionComplete, readOnly: readOnlyProp }: Props) {
   const { get, post } = useApi();
   const [decision,   setDecision]   = useState<LogEntry | null>(null);
   const [loading,    setLoading]    = useState(false);
@@ -124,12 +153,30 @@ export function DecisionPanel({ incidentId, onActionComplete }: Props) {
     } finally { setSubmitting(false); }
   }
 
+  // Editable only while pending. An explicit readOnly prop (from the inline
+  // queue) wins; otherwise fall back to inspecting the fetched decision so the
+  // standalone sidebar panel is protected too.
+  const readOnly = decision != null && (readOnlyProp ?? !isStillActionable(decision));
+
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#0E0F14', color: '#E8E9F0' }}>
       {/* Header */}
-      <div className="px-6 py-4 border-b flex-shrink-0" style={{ borderColor: B, backgroundColor: '#16171E' }}>
-        <h2 className="text-base font-semibold">Decision Panel</h2>
-        <p className="text-xs mt-0.5" style={{ color: '#6B7A99' }}>Accept, override, or dismiss the AI's routing recommendation</p>
+      <div className="px-6 py-4 border-b flex-shrink-0 flex items-start gap-3"
+        style={{ borderColor: B, backgroundColor: '#16171E' }}>
+        <div className="flex-1">
+          <h2 className="text-base font-semibold">Decision Panel</h2>
+          <p className="text-xs mt-0.5" style={{ color: '#6B7A99' }}>
+            {readOnly
+              ? 'This incident has already been reviewed — read only'
+              : "Accept, override, or dismiss the AI's routing recommendation"}
+          </p>
+        </div>
+        {readOnly && (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap"
+            style={{ color: '#6B7A99', backgroundColor: 'rgba(107,112,128,0.12)', border: `1px solid ${B}` }}>
+            <Lock size={11} /> Reviewed
+          </span>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5">
@@ -187,30 +234,66 @@ export function DecisionPanel({ incidentId, onActionComplete }: Props) {
                 </p>
               )}
 
-              {/* Action buttons: filled Accept is the primary CTA */}
-              <div className="flex flex-wrap gap-3">
-                {decision.experiment_mode !== 'human_only' && (
-                  <button onClick={handleAccept} disabled={submitting}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-opacity"
-                    style={{ backgroundColor: '#3EBD8C', color: '#fff', opacity: submitting ? 0.5 : 1 }}>
-                    <CheckCircle size={15} /> Accept
+              {/* Action buttons: filled Accept is the primary CTA.
+                  Hidden once the incident has been reviewed (BUG 2) so the
+                  recorded decision cannot be changed. */}
+              {!readOnly && (
+                <div className="flex flex-wrap gap-3">
+                  {decision.experiment_mode !== 'human_only' && (
+                    <button onClick={handleAccept} disabled={submitting}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-opacity"
+                      style={{ backgroundColor: '#3EBD8C', color: '#fff', opacity: submitting ? 0.5 : 1 }}>
+                      <CheckCircle size={15} /> Accept
+                    </button>
+                  )}
+                  <button onClick={() => setShowForm(f => !f)}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold"
+                    style={{ border: '1.5px solid #E8913A', color: '#E8913A', backgroundColor: 'rgba(232,145,58,0.1)' }}>
+                    <ArrowLeftRight size={15} /> {decision.experiment_mode === 'human_only' ? 'Choose Action' : 'Override'}
                   </button>
-                )}
-                <button onClick={() => setShowForm(f => !f)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold"
-                  style={{ border: '1.5px solid #E8913A', color: '#E8913A', backgroundColor: 'rgba(232,145,58,0.1)' }}>
-                  <ArrowLeftRight size={15} /> {decision.experiment_mode === 'human_only' ? 'Choose Action' : 'Override'}
-                </button>
-                <button onClick={() => setResult({ ok: true, message: 'Incident dismissed — no action taken.' })}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold"
-                  style={{ border: `1.5px solid ${B}`, color: '#6B7A99' }}>
-                  <XCircle size={15} /> Dismiss
-                </button>
-              </div>
+                  <button onClick={() => setResult({ ok: true, message: 'Incident dismissed — no action taken.' })}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold"
+                    style={{ border: `1.5px solid ${B}`, color: '#6B7A99' }}>
+                    <XCircle size={15} /> Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Read-only outcome — what was already decided for this incident */}
+              {readOnly && (() => {
+                const outcome = describeOutcome(decision);
+                const action  = outcome.action as DecisionAction;
+                const showReason =
+                  decision.override_reason &&
+                  decision.override_reason !== 'Accepted AI recommendation';
+                return (
+                  <div className="rounded-xl p-4" style={{ backgroundColor: '#0E0F14', border: `1px solid ${B}` }}>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm" style={{ color: '#B0B3C6' }}>{outcome.verb}</span>
+                      <span className="px-3 py-1 rounded-full text-sm font-bold"
+                        style={{ backgroundColor: `${REC_COLOR[action] ?? '#6B7A99'}22`,
+                                 color: REC_COLOR[action] ?? '#B0B3C6',
+                                 border: `1.5px solid ${REC_COLOR[action] ?? B}` }}>
+                        {REC_LABEL[action] ?? outcome.action}
+                      </span>
+                    </div>
+                    {showReason && (
+                      <p className="text-xs mt-3" style={{ color: '#6B7A99' }}>
+                        Reason: <span style={{ color: '#B0B3C6' }}>{decision.override_reason}</span>
+                      </p>
+                    )}
+                    {decision.cost != null && (
+                      <p className="text-xs mt-2" style={{ color: '#6B7A99' }}>
+                        Cost: <span className="font-mono font-semibold" style={{ color: '#B0B3C6' }}>€{decision.cost.toFixed(2)}</span>
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
-            {/* Override form — toggled by Override button */}
-            {showForm && (
+            {/* Override form — toggled by Override button (never in read-only) */}
+            {!readOnly && showForm && (
               <div className="rounded-xl p-5" style={{ backgroundColor: '#16171E', border: '1.5px solid #E8913A' }}>
                 <p className="text-sm font-semibold mb-4" style={{ color: '#E8913A' }}>Override AI recommendation</p>
 

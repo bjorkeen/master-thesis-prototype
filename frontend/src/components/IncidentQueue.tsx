@@ -598,10 +598,12 @@ export function IncidentQueue({ onSelect, experimentActive = true }: Props) {
                             padding: 18,
                           }}
                         >
-                          {/* Mini header with collapse control */}
+                          {/* Mini header with collapse control. A row that has
+                              already been acted on opens read-only (see BUG 2),
+                              so it says "Viewing" rather than "Reviewing". */}
                           <div className="flex items-center mb-3">
                             <span className="text-xs font-medium" style={{ color: '#6B7A99' }}>
-                              Reviewing{' '}
+                              {isPending(entry) ? 'Reviewing' : 'Viewing'}{' '}
                               <span className="font-mono" style={{ color: '#4C8BF5' }}>
                                 {entry.incident_id}
                               </span>
@@ -628,6 +630,7 @@ export function IncidentQueue({ onSelect, experimentActive = true }: Props) {
                                 <DecisionPanel
                                   incidentId={entry.incident_id}
                                   onActionComplete={handleActionComplete}
+                                  readOnly={!isPending(entry)}
                                 />
                               </div>
                             </div>
@@ -637,6 +640,7 @@ export function IncidentQueue({ onSelect, experimentActive = true }: Props) {
                               <DecisionPanel
                                 incidentId={entry.incident_id}
                                 onActionComplete={handleActionComplete}
+                                readOnly={!isPending(entry)}
                               />
                             </div>
                           )}
