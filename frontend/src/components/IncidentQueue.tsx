@@ -4,7 +4,7 @@
  * Props: onSelect(incidentId) — called when a row is clicked.
  */
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, Info, RefreshCw, X } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { DecisionPanel } from './DecisionPanel';
 import { ShapExplainer } from './ShapExplainer';
@@ -128,6 +128,49 @@ type SortColumn =
   | 'confidence'
   | 'routing'
   | 'status';
+
+// Plain-language hint shown when the user hovers the ⓘ icon next to a column header.
+const COLUMN_TOOLTIPS: Record<SortColumn, string> = {
+  incident_id: 'Unique identifier for this data quality incident',
+  anomaly:     'What kind of data quality problem was detected: null_values, duplicates, schema_mismatch, outlier, referential_integrity, data_corruption',
+  affected:    'What percentage of records in the dataset are affected — higher means more impactful',
+  source:      'Where the data came from: crm, erp, api_feed, manual_entry, iot_stream, data_warehouse',
+  stage:       'Where in the pipeline the anomaly was caught: ingestion, transformation, validation, loading, serving — later stages are more concerning',
+  confidence:  'How certain the AI model is about its prediction, as a percentage — lower confidence means more uncertainty',
+  routing:     'How the system routed this incident: Auto (high confidence), Escalate (uncertain), Critical (very uncertain or high risk)',
+  status:      'Whether this incident has been reviewed — PENDING means it needs your action, REVIEWED means a decision was made',
+};
+
+// Small ⓘ icon + CSS-only hover tooltip. Lives inside the header next to the
+// sortable label; its own click is swallowed so it never triggers sort.
+function HeaderTooltip({ text }: { text: string }) {
+  return (
+    <span
+      className="relative inline-flex items-center group ml-1.5 align-middle"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Info size={11} style={{ color: '#6B7A99', opacity: 0.55 }} />
+      <span
+        className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 top-full mt-2
+                   px-3 py-2 rounded text-xs font-normal normal-case tracking-normal
+                   pointer-events-none"
+        style={{
+          backgroundColor: '#1E1F2A',
+          color: '#E8E9F0',
+          border: '1px solid #2A2B38',
+          maxWidth: 250,
+          width: 'max-content',
+          whiteSpace: 'normal',
+          lineHeight: 1.4,
+          zIndex: 50,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+        }}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
 
 const ROUTING_ORDER: Record<string, number> = {
   auto_resolve: 0,
@@ -388,22 +431,29 @@ export function IncidentQueue({ onSelect }: Props) {
                 ).map(({ col, label }) => (
                   <th
                     key={label || 'dot'}
-                    className={`px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide whitespace-nowrap border-b ${
-                      col ? 'cursor-pointer select-none hover:brightness-125' : ''
-                    }`}
+                    className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide whitespace-nowrap border-b"
                     style={{
                       color: col && sortColumn === col ? '#4C8BF5' : '#6B7A99',
                       borderColor: B,
                     }}
-                    onClick={col ? () => toggleSort(col) : undefined}
-                    title={col ? `Sort by ${label}` : undefined}
                   >
-                    {label}
-                    {col && sortColumn === col && (
-                      <span className="ml-1 tabular-nums" aria-hidden>
-                        {sortDir === 'asc' ? '↑' : '↓'}
+                    {col ? (
+                      <span className="inline-flex items-center">
+                        <span
+                          className="cursor-pointer select-none hover:brightness-125"
+                          onClick={() => toggleSort(col)}
+                          title={`Sort by ${label}`}
+                        >
+                          {label}
+                          {sortColumn === col && (
+                            <span className="ml-1 tabular-nums" aria-hidden>
+                              {sortDir === 'asc' ? '↑' : '↓'}
+                            </span>
+                          )}
+                        </span>
+                        <HeaderTooltip text={COLUMN_TOOLTIPS[col]} />
                       </span>
-                    )}
+                    ) : null}
                   </th>
                 ))}
               </tr>

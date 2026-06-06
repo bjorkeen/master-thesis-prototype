@@ -1,0 +1,10 @@
+Gateway listening on http://localhost:4000
+  ML       → http://localhost:8001  (via /api/predict, /api/explain, /api/model)
+  Twin     → http://localhost:8002  (via /api/twin  →  strips /api/twin)
+  Decision → http://localhost:8003  (via /api/route, /api/decisions, /api/experiment, /api/config, /api/incidents, /api/health)
+[ws] client connected  (zBFa42LgqbefZKcbAAAB)
+(node:70600) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[ws] client disconnected (zBFa42LgqbefZKcbAAAB)
+[ws] client connected  (x5utf_hrqNjSKs-pAAAD)
+[ws] client disconnected (x5utf_hrqNjSKs-pAAAD)

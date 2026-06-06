@@ -654,8 +654,38 @@ async def route_incident(features: IncidentFeatures):
             twin_state = {"error": "Twin Service returned an error"}
 
         # ── Step 3: Apply routing logic ────────────────────────────────────
+        # The SLA-boost tightens the routing gates (T_auto up, T_crit up) as the
+        # twin's sla_remaining_s drains. The twin drains SLA purely from
+        # open_incidents (sla = 3600 - open*90), and every escalate/critical
+        # incident is registered with the twin as an open "arrive" so the live
+        # TwinStatePanel shows the backlog (see _notify_twin_arrived in /decisions).
+        #
+        # In the fixed-batch experimental protocol the WHOLE dataset is routed in
+        # one fast, unattended sweep BEFORE any human review starts. So those
+        # pending-review incidents pile up in the twin (open_incidents climbs
+        # 0→~40) even though no analyst clock is actually running yet. Feeding that
+        # drained SLA back into the routing thresholds created a feedback loop:
+        # routing one incident to human review tightened T_auto (0.85→0.935→0.999),
+        # which pushed the NEXT high-confidence incident to human review too —
+        # starving legitimate auto-resolves (only 3 of 14 conf≥0.85 incidents
+        # auto-resolved before this fix).
+        #
+        # The SLA-boost is meant to react to GENUINE real-time analyst pressure,
+        # not to the review backlog this sweep is itself accumulating. Those
+        # pending incidents do not consume analyst SLA time until the review phase
+        # begins. So compute the routing thresholds from the SLA pressure of
+        # incidents that are genuinely under analyst time pressure = open_incidents
+        # minus this run's not-yet-reviewed pending backlog. During the routing
+        # sweep that difference is ~0, so routing uses the base gates and each
+        # incident is judged on its own confidence (the boost still fires in a
+        # streaming deployment where incidents are actively worked concurrently).
         sla_remaining   = twin_state.get("sla_remaining_s", float("inf"))
-        thresholds      = _compute_thresholds(sla_remaining)
+        open_incidents  = twin_state.get("open_incidents", 0) or 0
+        pending_backlog = sum(1 for d in decision_log if _is_pending_human_review(d))
+        active_open     = open_incidents - pending_backlog
+        # Only genuine (non-backlog) open incidents exert real-time SLA pressure.
+        sla_for_routing = sla_remaining if active_open > 0 else float("inf")
+        thresholds      = _compute_thresholds(sla_for_routing)
 
         routing_decision, explanation = _apply_routing_logic(
             mode=experiment["mode"],
