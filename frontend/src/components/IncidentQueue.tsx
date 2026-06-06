@@ -31,7 +31,18 @@ interface LogEntry extends Decision {
 
 interface LogResponse { decisions: LogEntry[]; total: number; }
 
-export interface Props { onSelect?: (id: string) => void; }
+export interface Props {
+  onSelect?: (id: string) => void;
+  /**
+   * Whether an experiment is currently active. The decision log (and its run_id)
+   * is kept on the backend after an experiment stops so results can still be
+   * exported — so we cannot rely on run_id alone to know the queue is "done".
+   * When this is false we clear the table and show an empty state instead of
+   * lingering on the finished run's incidents. Defaults to true so the queue
+   * behaves normally if the flag is ever omitted.
+   */
+  experimentActive?: boolean;
+}
 
 // ---- pure helpers ----
 
@@ -235,7 +246,7 @@ function compareEntries(a: LogEntry, b: LogEntry, col: SortColumn, dir: 'asc' | 
 }
 
 // ---- component ----
-export function IncidentQueue({ onSelect }: Props) {
+export function IncidentQueue({ onSelect, experimentActive = true }: Props) {
   const { get } = useApi();
   const [entries,    setEntries]    = useState<LogEntry[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -247,6 +258,20 @@ export function IncidentQueue({ onSelect }: Props) {
   const [sortDir,    setSortDir]    = useState<'asc' | 'desc'>('asc');
 
   function fetchEntries(showSpinner = false) {
+    // No active experiment → empty the queue. The backend still holds the last
+    // run's decisions (for export), so without this guard the queue would keep
+    // showing the finished run's incidents after a (force) stop.
+    if (experimentActive === false) {
+      setEntries([]);
+      setError(null);
+      setLoading(false);
+      setRefreshing(false);
+      // Drop any inline expansion / row selection so a stale detail panel can't
+      // linger once the table is cleared.
+      setExpandedIncidentId(null);
+      setSelectedId(null);
+      return;
+    }
     if (showSpinner) setRefreshing(true);
     get<DecisionStats>('/api/decisions/stats')
       .then((stats) => {
@@ -267,12 +292,14 @@ export function IncidentQueue({ onSelect }: Props) {
       .finally(() => { setLoading(false); setRefreshing(false); });
   }
 
-  // Initial load + poll every 5 s so the queue stays fresh during a batch run
+  // Initial load + poll every 5 s so the queue stays fresh during a batch run.
+  // Re-runs when experimentActive flips so stopping a run empties the queue at
+  // once (and starting a new one resumes polling).
   useEffect(() => {
     fetchEntries();
     const id = setInterval(() => fetchEntries(), 5000);
     return () => clearInterval(id);
-  }, [get]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [get, experimentActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pendingCount = entries.filter(isPending).length;
   const mode         = entries[0]?.experiment_mode;
@@ -406,7 +433,9 @@ export function IncidentQueue({ onSelect }: Props) {
       )}
       {!loading && !error && entries.length === 0 && (
         <div className="flex-1 flex items-center justify-center text-sm text-center px-8" style={{ color: '#6B7080' }}>
-          No incidents loaded. Start an experiment from the Experiment page to begin.
+          {experimentActive === false
+            ? 'No active experiment. Start one from the Experiment page to see incidents here.'
+            : 'No incidents loaded. Start an experiment from the Experiment page to begin.'}
         </div>
       )}
 

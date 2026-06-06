@@ -23,6 +23,12 @@ import type { PanelKey } from '../App';
 export interface ExperimentControlProps {
   /** Called when the user clicks "Go to queue →" in the CTA banner. */
   setActivePanel: (panel: PanelKey) => void;
+  /**
+   * Called right after an experiment is stopped (normal or force stop) so the
+   * parent can immediately reset incident-level UI (queue, decision panel, SHAP)
+   * instead of waiting for the next 5 s health poll to notice the run ended.
+   */
+  onStopped?: () => void;
 }
 
 type ExperimentMode = 'ai_only' | 'human_only' | 'hitl';
@@ -146,7 +152,7 @@ function RoutingCard({
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function ExperimentControl({ setActivePanel }: ExperimentControlProps) {
+export function ExperimentControl({ setActivePanel, onStopped }: ExperimentControlProps) {
   const { post, get } = useApi();
 
   // Experiment lifecycle state
@@ -300,6 +306,7 @@ export function ExperimentControl({ setActivePanel }: ExperimentControlProps) {
       setResults(res);
       setRunning(false);
       setBatchRunning(false);
+      onStopped?.();   // let App reset the queue / decision / SHAP panels now
     } catch (e: unknown) {
       setError((e as Error).message);
     } finally { setBusy(false); }
@@ -324,6 +331,7 @@ export function ExperimentControl({ setActivePanel }: ExperimentControlProps) {
     setBatchDone(0); setBatchTotal(0); setBatchAutoResolved(0);
     setBatchPending(0); setBatchEscalated(0); setBatchCritical(0);
     setBatchLogFailures(0); setReviewedCount(0);
+    onStopped?.();   // let App reset the queue / decision / SHAP panels now
   }
 
   // ── Batch runner ────────────────────────────────────────────────────────────

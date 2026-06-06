@@ -13,7 +13,7 @@
  * display:none to preserve component state across navigation.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Wifi, WifiOff } from 'lucide-react';
 
 import { useWebSocket } from './hooks/useWebSocket';
@@ -105,6 +105,25 @@ export default function App() {
   }, [aiPanelsLocked, activePanel]);
 
   const experimentRunning = experimentCtx?.active ?? false;
+
+  // When an experiment ends (active → inactive), clear the selected incident so
+  // the Decision Panel and AI Explanation fall back to their empty states
+  // instead of showing stale data from the run that just finished. (Those panels
+  // already render an empty state when incidentId is null.)
+  const prevRunningRef = useRef(false);
+  useEffect(() => {
+    if (prevRunningRef.current && !experimentRunning) {
+      setSelectedIncidentId(null);
+    }
+    prevRunningRef.current = experimentRunning;
+  }, [experimentRunning]);
+
+  // Push signal from ExperimentControl: the user just stopped the run. Optimistically
+  // mark the experiment inactive so the queue and panels reset immediately rather
+  // than waiting up to 5 s for the next health poll. The poll will confirm.
+  function handleExperimentStopped() {
+    setExperimentCtx(prev => (prev ? { ...prev, active: false } : prev));
+  }
 
   // All panels are always mounted; only the active one is visible.
   // This preserves component state (e.g. a running experiment) across navigation.
@@ -205,7 +224,7 @@ export default function App() {
       {/* ----------------------------------------------------------------- */}
       <main className="flex-1 overflow-auto">
         <div style={panelStyle('queue')}>
-          <IncidentQueue onSelect={setSelectedIncidentId} />
+          <IncidentQueue onSelect={setSelectedIncidentId} experimentActive={experimentRunning} />
         </div>
         {!aiPanelsLocked && (
           <div style={panelStyle('shap')}>
@@ -225,7 +244,7 @@ export default function App() {
         )}
         <div style={panelStyle('experiment')}>
           {/* setActivePanel is passed so the CTA button inside can navigate to the queue */}
-          <ExperimentControl setActivePanel={setActivePanel} />
+          <ExperimentControl setActivePanel={setActivePanel} onStopped={handleExperimentStopped} />
         </div>
       </main>
 
