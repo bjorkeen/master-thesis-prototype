@@ -26,6 +26,8 @@ The system classifies data quality incidents into three categories:
 | **Escalate** | Ambiguous, needs human review with AI recommendation + SHAP explanation | Confidence 0.50–0.85 |
 | **Critical** | Urgent, requires immediate human attention | Confidence < 0.50 |
 
+> The "Trigger" column is the intuition; the actual HITL routing is **class-aware** (see `_apply_routing_logic`): the AI's predicted class is consulted first — a `critical` class is always routed critical and never auto-resolved (safety-first) — then the confidence gates decide whether an `auto_resolve` class is confident enough to auto-close (else it escalates) and whether an `escalate` class is uncertain enough to flag critical. AI-only mode follows the predicted class directly; Human-only mode escalates everything.
+
 Three experimental modes are compared:
 - **AI-only** — all incidents decided by the ML model automatically
 - **Human-only** — all incidents go to human review (no AI recommendations shown)
@@ -251,7 +253,7 @@ curl -X POST http://localhost:4000/api/route \
 | GET | /decisions/log | Paginated decision history |
 | GET | /decisions/stats | Accuracy, cost, timing metrics |
 | POST | /experiment/start | Begin experiment run (wipes the in-memory decision log — clean slate) |
-| POST | /experiment/stop | End experiment, compute results (keeps `run_id` so post-stop reads still resolve) |
+| POST | /experiment/stop | End experiment, compute results (keeps `run_id` so post-stop reads still resolve). Returns 409 if incidents are still pending review unless `?force=true` |
 | GET | /experiment/results | Final experiment metrics |
 | GET | /experiment/export | Download decision log as CSV |
 | GET | /incidents/sample | Stratified incident sample (protocol-locked `count` and `seed`) |
@@ -264,7 +266,9 @@ curl -X POST http://localhost:4000/api/route \
 - When a pending decision is overridden, a Twin `resolve` event is sent using `routing_action` as the severity (matching the original `arrive` event severity), so queue counters decrement correctly.
 - Experiment metrics and default CSV export include **resolved** decisions only (pending review rows are excluded unless `include_pending=true` is passed to export)
 - `POST /route` and `POST /decisions` require an **active** experiment run
-- Protocol lock: sampling is server-enforced to `max_incidents_per_experiment` and configured seed
+- `POST /experiment/stop` is blocked (409) while incidents remain pending human review; pass `?force=true` to skip the guard (force-reset / demo)
+- Protocol lock: sampling is server-enforced to `max_incidents_per_experiment` (100) and `experiment_seed` (42) from `config/routing_config.yaml`
+- **Active-open SLA correction:** `POST /route` derives `active_open = open_incidents − pending_backlog` and only lets the SLA-boost tighten the routing thresholds when `active_open > 0`. During the unattended batch sweep all open incidents are this run's not-yet-reviewed backlog, so `active_open ≈ 0` and routing uses the base 0.85/0.50 gates — each incident is judged on its own confidence rather than on how full the queue has become.
 - **Clean slate per run:** `/experiment/start` clears the in-memory decision store, so historical runs are not queryable after a new run starts. Export the previous run's CSV (`/experiment/export`) before starting the next one if you need its data. The Analytics dashboard polls every 5 s and resets to the empty state automatically when a fresh run begins.
 
 ---
@@ -280,7 +284,9 @@ The React frontend has a **sectioned sidebar** navigation with emoji icons, orga
 | INSPECT | 💡 AI Explanation, 🔄 Digital Twin | Understand SHAP feature contributions; monitor live pipeline state |
 | ANALYZE | 📊 Analytics | Post-experiment accuracy, cost, and override charts |
 
-The default landing panel is **Experiment**. A green pulse dot appears in the sidebar next to "Experiment" whenever a run is active.
+The default landing panel is **Experiment**. A green pulse dot appears in the sidebar next to "Experiment" whenever a run is active. In **Human-only** mode the AI-output panels (💡 AI Explanation and 📊 Analytics) are hidden for the duration of the run, so participants in that condition never see AI cues.
+
+All six panels stay mounted at all times (inactive ones are hidden with `display:none`) so a running experiment and its component state survive sidebar navigation.
 
 **ExperimentControl highlights:**
 - Mode selector is locked (greyed out) while a run is in progress
@@ -288,14 +294,18 @@ The default landing panel is **Experiment**. A green pulse dot appears in the si
 - Routing breakdown cards show how many incidents were auto-resolved / escalated / critical (confidence-based, regardless of mode)
 - "Reviewed" count polls `/api/decisions/log` every 10 s and counts rows where `human_action != null AND routing_action != 'auto_resolve'` (accepts and overrides both count)
 - Page refresh during a live run restores all counters from backend state on mount
-- Export CSV and Stop Experiment buttons are visible while a run is active
+- Export CSV and Stop Experiment buttons are visible while a run is active; a **Force Stop** control (two-click arm → confirm) calls `/api/experiment/stop?force=true` + `/api/twin/reset` to reset mid-run
+- On stop, an `onStopped` callback tells App to reset the review UI immediately (clears the selected incident; the Incident Queue empties) rather than waiting for the next health poll
 
 **IncidentQueue highlights:**
+- **Sortable columns** — click any header to sort (asc/desc, shown with ↑/↓); a small ⓘ icon on each header reveals a plain-language tooltip explaining the field
+- Colour-coded **routing-action column** (Auto = green, Escalate = orange, Critical = red) plus a PENDING / REVIEWED status badge
 - Progress bar between header and list shows reviewed / remaining / percentage for incidents requiring human review
 - **Inline detail panel** — clicking a pending incident row (in HITL / Human-only modes) expands a detail section directly below it, so the participant reviews and acts without switching tabs. HITL shows the SHAP explanation (left) alongside the Decision Panel (right); Human-only shows just the Decision Panel. ai_only rows do not expand.
-- After a successful Accept or Override, the row badge flips to REVIEWED and the **next pending incident auto-expands** — the participant flow becomes: see incident → see explanation → act → next opens, all in one view
+- After a successful Accept or Override, the row badge flips to REVIEWED and the **next pending incident auto-expands in the current sort order** — the participant flow becomes: see incident → see explanation → act → next opens, all in one view
+- **Already-reviewed rows open read-only** — they still expand (and the SHAP explanation is still visible) but the panel shows the recorded outcome with a 🔒 "Reviewed" indicator and no action buttons, so past decisions can be inspected but not changed
 - A small "X" button collapses the expanded panel without acting
-- Empty state guides the user to start an experiment first
+- Empty state guides the user to start an experiment first; when a run is stopped the queue clears (it does not linger on the finished run's incidents)
 
 ---
 

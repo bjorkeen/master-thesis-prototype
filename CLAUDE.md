@@ -34,22 +34,22 @@ Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
 - config/cost_model.yaml — asymmetric costs (missed_critical=100, false_escalation=10)
 
 ### Phase 2 — Python Microservices
-- services/ml-service/main.py — FastAPI :8001, ~518 lines
-- services/twin-service/main.py — FastAPI :8002, ~660 lines
-- services/decision-service/main.py — FastAPI :8003, ~937 lines
+- services/ml-service/main.py — FastAPI :8001, ~532 lines
+- services/twin-service/main.py — FastAPI :8002, ~664 lines
+- services/decision-service/main.py — FastAPI :8003, ~1323 lines
 
 ### Phase 3 — Database + Gateway + Frontend
 - data/db.py — SQLite connection helper, table definitions, CRUD functions (schema ready; services use in-memory storage during experiments)
 - data/create_tables.py — creates the 4 tables (incidents, decisions, twin_snapshots, experiment_runs)
 - data/hitl_cdt.db — SQLite database file (schema defined; not used by services at runtime — in-memory storage is sufficient for the fixed-batch experimental protocol)
 - gateway/index.js — Node.js Express :4000, http-proxy-middleware v3, Socket.io WebSocket
-- frontend/src/App.tsx — root layout, sectioned sidebar nav (SETUP/REVIEW/INSPECT/ANALYZE) with emoji icons, default panel = 'experiment', exports PanelKey type, green pulse dot when experiment active
-- frontend/src/components/IncidentQueue.tsx — incident list, progress bar (reviewed/remaining/%), status badges, expandable inline detail panel (SHAP + Decision) with auto-advance to next pending
-- frontend/src/components/ShapExplainer.tsx — SHAP horizontal bar chart, feature table (used standalone in sidebar AND inline in IncidentQueue)
-- frontend/src/components/DecisionPanel.tsx — AI recommendation + human override form; optional onActionComplete callback for the inline-queue flow
-- frontend/src/components/TwinStatePanel.tsx — live pipeline state gauges via WebSocket
-- frontend/src/components/AnalyticsDashboard.tsx — accuracy/cost/override charts (Recharts)
-- frontend/src/components/ExperimentControl.tsx — mode selector (locked during run), start/stop/export, routing breakdown cards, progress stats, CTA banner, 10s polling for reviewed count, mount-sync after page refresh
+- frontend/src/App.tsx — root layout, sectioned sidebar nav (SETUP/REVIEW/INSPECT/ANALYZE) with emoji icons, default panel = 'experiment', exports PanelKey type, green pulse dot when experiment active; on experiment stop (active→inactive, detected via the 5s /api/health poll or the ExperimentControl onStopped push) it clears selectedIncidentId and passes experimentActive to IncidentQueue so the review UI resets
+- frontend/src/components/IncidentQueue.tsx — sortable incident list (click column headers; ↑/↓), info-tooltip ⓘ on each header, routing-action column with colour-coded badges, progress bar (reviewed/remaining/%), status badges (PENDING/REVIEWED), expandable inline detail panel (SHAP + Decision) with auto-advance to next pending in SORTED order; reviewed rows expand READ-ONLY; empty state when no experiment is active (experimentActive=false clears the table)
+- frontend/src/components/ShapExplainer.tsx — SHAP horizontal bar chart, feature table; fetches GET /api/explain/{incidentId} (used standalone in sidebar AND inline in IncidentQueue)
+- frontend/src/components/DecisionPanel.tsx — AI recommendation + human override form; optional onActionComplete callback for the inline-queue flow; readOnly mode (prop OR self-determined via isStillActionable) shows a locked outcome card (no action buttons) for already-reviewed / auto-resolved / ai_only decisions
+- frontend/src/components/TwinStatePanel.tsx — live pipeline state gauges via WebSocket; SLA Health bar uses sla_total_s from twin state (not hardcoded)
+- frontend/src/components/AnalyticsDashboard.tsx — accuracy/cost/override charts (Recharts); polls /api/decisions/stats every 5s and zeroes when a new run starts
+- frontend/src/components/ExperimentControl.tsx — mode selector (locked during run), start/stop/force-stop/export, routing breakdown cards, progress stats, CTA banner, 10s polling for reviewed count, mount-sync after page refresh, onStopped callback to parent
 - frontend/src/hooks/useApi.ts — typed GET/POST wrapper around fetch
 - frontend/src/hooks/useWebSocket.ts — Socket.io client, twin state subscription
 - frontend/src/types/index.ts — TypeScript interfaces for all API response shapes
@@ -70,9 +70,16 @@ Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
 - ML model: RandomForest, 200 trees, class_weight='balanced', OrdinalEncoder for categoricals
 - Model performance: auto_resolve F1=0.82, escalate F1=0.46, critical F1=0.43, macro F1=0.57
 - SHAP: TreeExplainer, explains 'escalate' class by default (the ambiguous one humans review)
-- Confidence thresholds: >0.85 = auto-resolve, <0.50 = critical, between = escalate
-- SLA boost: thresholds tighten when SLA < 10min or < 5min remaining
-- Cost model: correct_auto=€0, correct_escalate=€10, correct_critical=€15, false_escalation=€10, missed_escalation=€50, missed_critical=€100, human_misclassification=€30
+- Base confidence thresholds: auto_resolve ≥ 0.85, critical < 0.50 (config/routing_config.yaml)
+- HITL routing is CLASS-AWARE (not a flat 3-way confidence cut). `_apply_routing_logic` in the decision service applies, in order:
+  1. ai_only mode → routing_decision = the AI's predicted class directly (confidence ignored)
+  2. human_only mode → always `escalate` (every incident goes to a human; AI ignored)
+  3. HITL + predicted class `critical` → `critical` (safety-first; a critical class is NEVER auto-resolved)
+  4. HITL + predicted class `auto_resolve` → `auto_resolve` if confidence ≥ T_auto, else `escalate`
+  5. HITL + predicted class `escalate` → `critical` if confidence < T_crit (high uncertainty), else `escalate`
+- Active-open SLA correction (decision service /route): SLA-boost would otherwise tighten T_auto/T_crit as the twin's open_incidents climbs during the unattended batch sweep, starving auto-resolve. /route computes `active_open = open_incidents − pending_backlog` (pending_backlog = this run's not-yet-reviewed rows) and only lets the SLA drain the thresholds when active_open > 0; during the batch sweep active_open ≈ 0, so routing uses the base gates and each incident is judged on its own confidence.
+- SLA boost schedule: thresholds tighten when SLA < 10 min (auto +10%, crit +5%) or < 5 min (auto +20%, crit +10%); auto capped at 0.999
+- Cost model: correct_auto=€0, correct_escalate=€10, correct_critical=€15, false_escalation=€10, missed_escalation=€50, missed_critical=€100, human_misclassification=€30 (defined in cost_model.yaml; human_misclassification not currently referenced by _compute_cost)
 
 ## Project Structure
 ```
@@ -172,7 +179,7 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - GET /health — output: {status, model_loaded}
 
 ### Twin Service (:8002)
-- GET /state — output: full PipelineState (open_incidents, queue_depth, workload, SLA, etc.)
+- GET /state — output: full PipelineState (open_incidents, open_critical, open_escalated, queue_depth, throughput_per_hour, analyst_workload_pct, sla_remaining_s, sla_total_s, auto_resolve_rate)
 - POST /state/event — input: {event_type: arrive|resolve, incident_id, severity} → updates state
 - GET /state/history?limit=100 — output: list of StateSnapshot objects
 - GET /sla — output: {sla_remaining_s, sla_used_pct, risk_level: green|yellow|red}
@@ -183,14 +190,15 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 ### Decision Service (:8003)
 - POST /route — THE MAIN ENDPOINT: takes incident features, calls ML+Twin, returns routing decision with explanation (requires active experiment). Twin `arrive` is sent only for `ai_only` or when the routed outcome is `auto_resolve`, so SLA does not drain during the unattended batch routing phase.
 - POST /decisions — logs a decision row, computes is_correct/cost (requires active experiment + mode match). For pending rows (escalate/critical in HITL/human_only modes), sends a Twin `arrive` event via `_notify_twin_arrived` so queue depth and workload are accurate during the review phase.
-- POST /decisions/{id}/override — records human decision update for the active run only; sends Twin `resolve` event using `routing_action` (not `final_action`) as the severity so counters match the original `arrive` event
+- POST /decisions/{id}/override — records human decision update for the active run only; sets human_action + final_action, and sets human_override_to only when the new action differs from ai_recommendation. If the row was pending, sends a Twin `resolve` event using `routing_action` (not `final_action`) as the severity so counters match the original `arrive` event
+- GET /decisions/incident/{incident_id} — returns the latest logged (flattened) decision for one incident_id; used by ML Service /explain/{incident_id} to fetch the exact routed feature set
 - GET /decisions/log?page=1&page_size=20&mode=hitl&run_id=X — paginated decision history
 - GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; returns cost_breakdown (not by_action)
 - POST /experiment/start — input: {mode, incident_count} → begins new run, resets Twin, and **wipes the in-memory `decision_log` + `decision_index`** (clean slate per run; export the previous run first if needed)
-- POST /experiment/stop — ends run (sets `active=False`), computes final ExperimentResults. **Keeps `experiment["run_id"]`** so post-stop analytics/export still resolve to the completed run; new writes are blocked by the `active=False` guard in /route, /decisions, and /decisions/{id}/override
+- POST /experiment/stop?force=false — ends run (sets `active=False`), computes final ExperimentResults. Returns 409 if incidents are still pending human review unless `?force=true` (force-reset / demo). **Keeps `experiment["run_id"]`** so post-stop analytics/export still resolve to the completed run; new writes are blocked by the `active=False` guard in /route, /decisions, and /decisions/{id}/override
 - GET /experiment/results — returns ExperimentResults for last completed run
-- GET /experiment/export?run_id=X — streams decision log as CSV download
-- GET /incidents/sample?count=100&seed=42 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); protocol lock enforces count and seed
+- GET /experiment/export?run_id=X&include_pending=false — streams decision log as CSV download (resolved rows only unless include_pending=true)
+- GET /incidents/sample?count=100&seed=42 — stratified sample from data/incidents.csv (preserves 60/30/10 ratio); protocol lock enforces count (max_incidents_per_experiment=100) and seed (42)
 - GET /health — output: {status, experiment_mode, experiment_active, decision_count}
 
 ## Gateway Proxy Path Rewriting
@@ -198,9 +206,11 @@ Each service has a different URL prefix, so each proxy uses its own pathRewrite:
 
 | Frontend path | Strips | Forwarded to |
 |---|---|---|
-| /api/predict/*, /api/explain/*, /api/model/* | ^/api | :8001 /predict/…, /explain/…, /model/… |
-| /api/twin/* | ^/api/twin | :8002 /state, /sla, /simulate, /reset |
-| /api/decisions/*, /api/experiment/*, /api/config/*, /api/route/* | ^/api | :8003 /decisions/…, /experiment/…, /route |
+| /api/predict/**, /api/explain/**, /api/model/** | ^/api | :8001 /predict/…, /explain/…, /model/… |
+| /api/twin/** | ^/api/twin | :8002 /state, /sla, /simulate, /reset |
+| /api/decisions*, /api/experiment*, /api/config*, /api/route*, /api/incidents*, /api/health | ^/api | :8003 /decisions/…, /experiment/…, /route, /incidents/…, /health |
+
+Note: the decision proxy uses a `pathFilter` predicate (prefix checks via `path.startsWith`), not a glob array, so `/api/health` routes to the Decision Service. The gateway also serves its OWN `/health` (no `/api` prefix) for a gateway-level liveness check — these are two distinct paths. The ML and Twin proxies use glob `**` pathFilters.
 
 Note: /api/twin/* must strip "/api/twin" (not just "/api") because the Twin Service
 endpoints have no /twin prefix — they are /state, /sla, etc.
@@ -231,6 +241,15 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
   The default active panel is `'experiment'` (not `'queue'`).
 - Sidebar uses `NAV_SECTIONS` (not a flat array): four sections SETUP / REVIEW / INSPECT / ANALYZE,
   each with emoji-prefixed items. A green pulse dot appears next to "Experiment" when a run is active.
+- In **human_only** mode while a run is active, App hides the AI-output panels: `aiPanelsLocked`
+  removes `shap` (AI Explanation) and `analytics` from the sidebar and, if one is open, redirects to
+  the queue — so participants in the human-only condition never see AI cues. A small amber banner in
+  the sidebar explains the hidden panels.
+- TwinStatePanel displays twin metrics computed in twin-service: SLA remaining = `3600 − open_incidents×90`
+  (cost_per_incident = SLA_TOTAL/40, so 40 open = full SLA consumed); analyst workload % =
+  `(open_escalated×0.05 + open_critical×0.10) / ANALYST_CAPACITY(1.0) × 100`; throughput/hr =
+  `total_resolved / hours_since_first_arrival`. The SLA Health bar uses `sla_total_s` from state
+  (`usedPct = 100 − sla_remaining_s/sla_total_s×100`) so the frontend never hardcodes the SLA window.
 - ShapExplainer receives three parallel arrays from GET /explain/{id}:
   shap_values (number[]), feature_names (string[]), feature_values ((string|number)[]).
   The component zips them internally into {feature, value, display} objects for the chart.
@@ -258,17 +277,41 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
 - IncidentQueue shows a progress bar between the header and the list when `reviewableCount > 0`.
   `reviewableCount` = entries where `routing_action !== 'auto_resolve'` and mode is hitl/human_only.
   `reviewedCount = reviewableCount - pendingCount` (no extra API call; data already fetched).
+- IncidentQueue columns are SORTABLE: clicking a header toggles asc/desc (↑/↓ marker) via
+  `sortColumn`/`sortDir`, and the table renders `sortedEntries` (a useMemo over entries). Each header
+  carries a small ⓘ `HeaderTooltip` with a plain-language hint. There is a colour-coded routing-action
+  column (Auto green / Escalate orange / Critical red) plus a PENDING/REVIEWED status badge.
 - IncidentQueue has an inline expandable detail panel (the participant review workflow — no tab
   switching). Clicking a row in hitl/human_only modes toggles `expandedIncidentId`, rendering a
   full-width `<tr><td colSpan={9}>` below it. ai_only rows do not expand. Layout by mode:
   hitl → two columns (ShapExplainer ~45% left, DecisionPanel ~55% right); human_only → DecisionPanel
   only. The detail area has a blue (#4C8BF5) left-border accent, #1E1F2A background, and an "X"
   collapse button. DecisionPanel and ShapExplainer are reused as-is (they self-fetch via incidentId).
+  Already-REVIEWED rows still expand but open READ-ONLY (`readOnly={!isPending(entry)}`), and the
+  mini-header says "Viewing" instead of "Reviewing".
+- IncidentQueue takes an `experimentActive` prop from App. When false (no active run), `fetchEntries`
+  clears the table and shows an empty state ("No active experiment …") — needed because the backend
+  KEEPS the decision log + run_id after stop, so polling alone would otherwise show the finished run.
 - DecisionPanel accepts an optional `onActionComplete(incidentId)` prop. After a successful Accept
   or Override it shows the result + cost delta for ~900 ms, then calls the callback. IncidentQueue's
   `handleActionComplete` then refreshes the log (badge flips to REVIEWED) and auto-expands the next
-  pending incident in display order (wrapping round). When the prop is omitted (standalone sidebar
-  DecisionPanel) behaviour is unchanged — the result card simply stays visible.
+  pending incident in SORTED display order (scans `sortedEntries` from N+1, wraps round, collapses if
+  none remain). When the prop is omitted (standalone sidebar DecisionPanel) behaviour is unchanged —
+  the result card simply stays visible.
+- DecisionPanel has a `readOnly` mode. The inline queue passes `readOnly={!isPending(entry)}`; when the
+  prop is omitted the panel self-determines via `isStillActionable(decision)` (editable only while
+  pending human review — routed to a human, not auto-resolved, human_action still null). In read-only
+  it hides Accept/Override/Dismiss and renders a locked outcome card ("You accepted/overrode/decided …"
+  + reason + recorded cost) with a 🔒 "Reviewed" pill. This protects ai_only and auto-resolved rows in
+  the standalone sidebar panel too.
+- Experiment reset on stop: App.tsx watches `experimentRunning` (from the 5s /api/health poll) and, on
+  the active→inactive transition, sets `selectedIncidentId = null` (so DecisionPanel + ShapExplainer
+  fall back to their empty states). ExperimentControl also calls an `onStopped` prop after both Stop
+  and Force-Stop so App can optimistically flip `experimentCtx.active = false` immediately rather than
+  waiting up to 5s for the poll. AnalyticsDashboard intentionally keeps showing the just-completed
+  run's metrics until the NEXT start (run_id persists), then zeroes.
+- ExperimentControl exposes a Force Stop control (two-click arm→confirm) that calls
+  `POST /api/experiment/stop?force=true` + `POST /api/twin/reset` and clears local batch counters.
 - The standalone sidebar Decision Panel and AI Explanation tabs still work independently; the inline
   versions are an ADDITIONAL access path, not a replacement.
 - index.css defines the `inlineDetailReveal` keyframe (`.inline-detail-enter`) for the expand fade-in.
