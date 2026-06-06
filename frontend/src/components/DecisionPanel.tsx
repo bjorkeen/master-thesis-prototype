@@ -307,7 +307,9 @@ export function DecisionPanel({ incidentId, onActionComplete, readOnly: readOnly
                 </select>
 
                 <label className="block text-xs mb-1" style={{ color: '#6B7A99' }}>
-                  Reason <span style={{ color: '#E5534B' }}>*</span> ({decision.experiment_mode === 'human_only' ? 'optional notes' : 'min 5 characters'})
+                  {decision.experiment_mode === 'human_only'
+                    ? <>Reason (optional)</>
+                    : <>Reason <span style={{ color: '#E5534B' }}>*</span></>}
                 </label>
                 <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
                   placeholder={decision.experiment_mode === 'human_only'
