@@ -19,6 +19,25 @@ Three experimental modes are compared: AI-only, Human-only, and HITL (collaborat
 - **Decision Service**: Python FastAPI on port 8003 (routing logic + decision logging)
 - **Storage**: In-memory (per service process) for prototype evaluation; SQLite schema ready at `data/hitl_cdt.db` via `data/db.py` + `data/create_tables.py` for production use
 
+## Dependencies (where each manifest lives)
+There are FOUR Python dependency surfaces and TWO Node ones. The data-script deps are
+separate from the service deps — do not assume installing the services covers the data scripts.
+- `data/requirements.txt` — **setup-time** deps for the data scripts: numpy, pandas, scikit-learn,
+  shap, joblib, **matplotlib** (train_model.py plots), **sqlalchemy** (db.py / create_tables.py).
+  matplotlib and sqlalchemy are NOT in any `services/*/requirements.txt`, so the data scripts
+  (`generate_dataset.py`, `train_model.py`, `create_tables.py`) need this file installed.
+  Optional `psycopg2-binary` (commented) only if `DATABASE_URL` points at PostgreSQL; db.py imports
+  psycopg2 lazily and falls back to SQLite otherwise.
+- `services/ml-service/requirements.txt` — fastapi, uvicorn, pandas, numpy, scikit-learn, joblib,
+  shap, python-multipart (runtime model + SHAP serving).
+- `services/twin-service/requirements.txt` — fastapi, uvicorn, python-multipart only (pure state engine,
+  no ML/DB deps).
+- `services/decision-service/requirements.txt` — fastapi, uvicorn, httpx (calls ML+Twin), pyyaml
+  (reads the configs), python-multipart. NOTE: the running services do NOT import `data/db.py`, so
+  SQLAlchemy is NOT a service runtime dep — it is only needed by `create_tables.py` at setup.
+- `gateway/package.json` — express, cors, http-proxy-middleware v3, socket.io (+ nodemon dev).
+- `frontend/package.json` — react 19, vite, tailwind v4, recharts, lucide-react, socket.io-client, axios.
+
 ## Current Build Status
 Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
 
@@ -97,7 +116,8 @@ hitl-cdt/
 │   ├── feature_names.json     # Ordered feature column names
 │   ├── confusion_matrix.png   # Model evaluation plot
 │   ├── shap_summary.png       # Global SHAP beeswarm (escalate class)
-│   └── shap_waterfall.png     # Single-incident waterfall
+│   ├── shap_waterfall.png     # Single-incident waterfall
+│   └── requirements.txt       # Setup-time deps for the scripts above (numpy, pandas, scikit-learn, shap, joblib, matplotlib, sqlalchemy)
 ├── config/
 │   ├── routing_config.yaml    # Thresholds, SLA boost, service URLs
 │   └── cost_model.yaml        # Asymmetric operational cost values

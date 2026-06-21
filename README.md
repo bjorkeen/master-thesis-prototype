@@ -92,7 +92,8 @@ hitl-cdt/
 │   ├── feature_names.json          # Ordered feature column names
 │   ├── confusion_matrix.png        # Model evaluation plot
 │   ├── shap_summary.png            # Global SHAP beeswarm plot
-│   └── shap_waterfall.png          # Single-incident SHAP waterfall
+│   ├── shap_waterfall.png          # Single-incident SHAP waterfall
+│   └── requirements.txt            # Setup-time deps for the scripts above (matplotlib, sqlalchemy, …)
 ├── config/
 │   ├── routing_config.yaml         # Decision routing thresholds + SLA boost
 │   └── cost_model.yaml             # Operational cost model (asymmetric penalties)
@@ -137,6 +138,31 @@ Root **`.gitignore`** excludes macOS `.DS_Store`, Python caches and virtualenvs,
 ### Prerequisites
 - Python 3.11+
 - Node.js 20+
+- (optional) PostgreSQL — only if you want to override the default SQLite backend via `DATABASE_URL`
+
+### 0. Install dependencies (first time only)
+```bash
+# (recommended) create and activate a virtualenv first
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# Data-pipeline scripts used in Step 1 (numpy, pandas, scikit-learn, shap,
+# joblib, matplotlib, sqlalchemy). These are NOT covered by the service
+# requirements, so install them explicitly.
+pip install -r data/requirements.txt
+
+# Runtime dependencies for each Python service (Step 2)
+pip install -r services/ml-service/requirements.txt
+pip install -r services/twin-service/requirements.txt
+pip install -r services/decision-service/requirements.txt
+
+# Node dependencies for the gateway (Step 3) and frontend (Step 4)
+npm install --prefix gateway
+npm install --prefix frontend
+```
+
+> **Why a separate `data/requirements.txt`?** `train_model.py` needs **matplotlib**
+> and `create_tables.py` needs **SQLAlchemy** — neither is required by the running
+> services, so they live with the data scripts rather than in `services/*/requirements.txt`.
 
 ### 1. Generate the dataset (first time only)
 ```bash
@@ -161,13 +187,13 @@ cd services/decision-service && uvicorn main:app --port 8003
 
 ### 3. Start the gateway
 ```bash
-cd gateway && node index.js
+cd gateway && npm install && node index.js   # npm install only needed the first time
 # → http://localhost:4000
 ```
 
 ### 4. Start the frontend
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend && npm install && npm run dev     # npm install only needed the first time
 # → http://localhost:5173
 ```
 
