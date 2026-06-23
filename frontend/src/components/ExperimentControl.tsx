@@ -840,7 +840,12 @@ export function ExperimentControl({ setActivePanel, onStopped }: ExperimentContr
             <div className="grid grid-cols-3 gap-3">
               <Stat label="Accuracy"     value={`${(results.accuracy * 100).toFixed(1)}%`}        color="#3EBD8C" />
               <Stat label="Total Cost"   value={`€${results.total_cost.toFixed(2)}`}              color="#E5534B" />
-              <Stat label="Avg Time"     value={fmtDuration(results.avg_resolution_time_s)} />
+              <Stat label="Avg Time (all)" value={fmtDuration(results.avg_resolution_time_s)} />
+              <Stat
+                label={`Human Review${results.human_reviewed_count ? ` (n=${results.human_reviewed_count})` : ''}`}
+                value={fmtDuration(results.avg_human_review_time_s)}
+                color="#4C8BF5"
+              />
               <Stat label="Incidents"    value={String(results.total_incidents)} />
               <Stat label="Overrides"    value={String(results.override_count)} />
               <Stat label="Override Rate" value={`${(results.override_rate * 100).toFixed(1)}%`}  color="#E8913A" />

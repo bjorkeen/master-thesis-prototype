@@ -214,6 +214,8 @@ class ExperimentResults(BaseModel):
     total_cost:           float
     avg_cost_per_incident: float
     avg_resolution_time_s: Optional[float]
+    avg_human_review_time_s: Optional[float] = None
+    human_reviewed_count: int = 0
     override_count:       int
     override_rate:        float
     started_at:           str
@@ -495,6 +497,8 @@ def _compute_stats(decisions: List[dict]) -> dict:
             "total_cost": 0.0,
             "avg_cost_per_incident": 0.0,
             "avg_resolution_time_s": None,
+            "avg_human_review_time_s": None,
+            "human_reviewed_count": 0,
             "override_count": 0,
             "override_rate": 0.0,
             "cost_breakdown": {},
@@ -504,9 +508,30 @@ def _compute_stats(decisions: List[dict]) -> dict:
     total_cost = sum(d.get("cost", 0.0) or 0.0 for d in resolved)
     overrides  = sum(1 for d in resolved if d.get("human_override_to") is not None)
 
-    # Resolution times (only for decisions where it was recorded)
+    # Resolution times (only for decisions where it was recorded).
+    # avg_resolution_time_s is the average over ALL resolved rows — it mixes the
+    # instant automated decisions (auto_resolve / ai_only) with the human-review
+    # rows, so it is the true end-to-end time-to-resolution for the whole run.
     times = [d["resolution_time_s"] for d in resolved if d.get("resolution_time_s")]
     avg_time = round(sum(times) / len(times), 2) if times else None
+
+    # avg_human_review_time_s isolates the HUMAN deliberation time: it averages
+    # resolution_time_s only over rows that were actually routed to a human
+    # analyst (escalate / critical in hitl or human_only modes). For these rows
+    # resolution_time_s was recomputed at override time as the queue-entry →
+    # analyst-decision interval, so this is a clean measure of how long humans
+    # took, independent of the automated rows that resolve instantly.
+    human_reviewed = [
+        d for d in resolved
+        if d.get("routing_action") != "auto_resolve"
+        and d.get("experiment_mode") in {"hitl", "human_only"}
+    ]
+    human_times = [
+        d["resolution_time_s"] for d in human_reviewed if d.get("resolution_time_s")
+    ]
+    avg_human_review_time = (
+        round(sum(human_times) / len(human_times), 2) if human_times else None
+    )
 
     # Cost breakdown by routing decision
     breakdown: Dict[str, dict] = {}
@@ -526,6 +551,8 @@ def _compute_stats(decisions: List[dict]) -> dict:
         "total_cost":           round(total_cost, 2),
         "avg_cost_per_incident": round(total_cost / total, 2) if total else 0.0,
         "avg_resolution_time_s": avg_time,
+        "avg_human_review_time_s": avg_human_review_time,
+        "human_reviewed_count":  len(human_reviewed),
         "override_count":       overrides,
         "override_rate":        round(overrides / total, 4) if total else 0.0,
         "cost_breakdown":       breakdown,
@@ -851,6 +878,8 @@ async def override_decision(decision_id: str, override: OverrideRequest):
       - override_reason    → why they disagreed
       - final_action       → updated to the human's choice
       - is_correct / cost  → recomputed if ground_truth is now known
+      - resolution_time_s  → for rows that were pending, recomputed as the real
+                             human-review time (queue entry → analyst decision)
 
     If the row was pending human review, this endpoint also marks the incident
     resolved in Twin Service.
@@ -895,10 +924,26 @@ async def override_decision(decision_id: str, override: OverrideRequest):
     doc["cost"]              = new_cost
 
     # If this incident was pending human review, it is now fully resolved.
-    # Use routing_action (not final_action) so the resolve matches the arrive
-    # event that was sent when the row was first logged — the twin decrements
-    # open_escalated for "escalate" and open_critical for "critical".
     if was_pending:
+        # Measure the real human-review time: the interval between when the row
+        # was logged as pending (i.e. it entered the analyst queue, recorded in
+        # `decided_at`) and now (the analyst submitting their decision). This
+        # OVERWRITES the placeholder resolution_time_s the frontend sent at
+        # routing time, which only captured the /route HTTP latency and said
+        # nothing about how long the human actually took. For ai_only and HITL
+        # auto_resolve rows (never pending) the original instant value is kept.
+        logged_at = doc.get("decided_at")
+        if logged_at:
+            try:
+                started = datetime.fromisoformat(logged_at)
+                elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+                doc["resolution_time_s"] = round(elapsed, 2)
+            except (ValueError, TypeError):
+                pass   # leave resolution_time_s untouched if the timestamp is unparseable
+
+        # Use routing_action (not final_action) so the resolve matches the arrive
+        # event that was sent when the row was first logged — the twin decrements
+        # open_escalated for "escalate" and open_critical for "critical".
         await _notify_twin_resolved(
             incident_id=doc["incident_id"],
             severity=doc["routing_action"],
@@ -1083,6 +1128,8 @@ async def stop_experiment(
         total_cost=stats["total_cost"],
         avg_cost_per_incident=stats["avg_cost_per_incident"],
         avg_resolution_time_s=stats["avg_resolution_time_s"],
+        avg_human_review_time_s=stats["avg_human_review_time_s"],
+        human_reviewed_count=stats["human_reviewed_count"],
         override_count=stats["override_count"],
         override_rate=stats["override_rate"],
         started_at=experiment["started_at"],

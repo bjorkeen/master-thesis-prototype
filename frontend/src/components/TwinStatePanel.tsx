@@ -3,6 +3,7 @@
  * Data arrives via WebSocket (gateway polls Twin Service every 5 s).
  * Props: twinState — latest state object, connected — WebSocket liveness.
  */
+import { useState } from 'react';
 import type { TwinState } from '../types';
 
 interface Props { twinState: TwinState | null; connected: boolean; }
@@ -35,15 +36,59 @@ function Bar({ pct, color }: { pct: number; color: string }) {
   );
 }
 
-// Large metric card: title, big number, optional unit, progress bar
-function MetricCard({ title, value, unit, barPct, barColor }: {
+// Small ⓘ icon that reveals an explanatory tooltip on hover/focus.
+// Used to document how each Twin metric is computed (and why batch-run
+// numbers can look very large).
+function InfoTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <span
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        tabIndex={0}
+        role="button"
+        aria-label="What is this metric?"
+        style={{
+          cursor: 'help', fontSize: '0.7rem', lineHeight: 1, color: '#6B7A99',
+          border: `1px solid ${B}`, borderRadius: '50%', width: 14, height: 14,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        i
+      </span>
+      {open && (
+        <span
+          style={{
+            position: 'absolute', top: '120%', left: 0, zIndex: 20, width: 240,
+            backgroundColor: '#0B0C11', color: '#C7CBD9', border: `1px solid ${B}`,
+            borderRadius: 8, padding: '8px 10px', fontSize: '0.7rem', lineHeight: 1.45,
+            letterSpacing: 0, textTransform: 'none', fontWeight: 400,
+            boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+          }}
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Large metric card: title, big number, optional unit, progress bar.
+// An optional `tooltip` adds an ⓘ next to the title explaining the metric.
+function MetricCard({ title, value, unit, barPct, barColor, tooltip }: {
   title: string; value: string | number; unit?: string; barPct: number; barColor: string;
+  tooltip?: string;
 }) {
   return (
     <div className="rounded-xl p-5 flex flex-col gap-3"
       style={{ backgroundColor: '#16171E', border: `1px solid ${B}` }}>
-      <p style={{ fontSize: '0.65rem', color: '#6B7A99', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+      <p className="flex items-center gap-1.5"
+        style={{ fontSize: '0.65rem', color: '#6B7A99', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
         {title}
+        {tooltip && <InfoTip text={tooltip} />}
       </p>
       <p className="font-bold leading-none" style={{ fontSize: '1.8rem', color: '#E8E9F0' }}>
         {value}
@@ -112,6 +157,7 @@ export function TwinStatePanel({ twinState: ts, connected }: Props) {
                 value={ts.queue_depth}
                 barPct={(ts.queue_depth / 30) * 100}
                 barColor={ts.queue_depth > 25 ? RD : ts.queue_depth > 15 ? OR : G}
+                tooltip="Incidents that have arrived but are not yet resolved. Goes up on each 'arrive' event and down on each 'resolve'."
               />
 
               {/* Throughput — always green, max reference 100/hr */}
@@ -121,6 +167,7 @@ export function TwinStatePanel({ twinState: ts, connected }: Props) {
                 unit="/hr"
                 barPct={(ts.throughput_per_hour / 100) * 100}
                 barColor={G}
+                tooltip="Resolved incidents ÷ real time elapsed since the first arrival, extrapolated to an hourly rate. During the batch run the whole dataset is processed in seconds, so this rate looks huge — it reflects simulation speed, not a realistic operational pace."
               />
 
               {/* Analyst Load — green < 50%, orange 50-75%, red > 75% */}
@@ -130,6 +177,7 @@ export function TwinStatePanel({ twinState: ts, connected }: Props) {
                 unit="%"
                 barPct={ts.analyst_workload_pct}
                 barColor={ts.analyst_workload_pct > 75 ? RD : ts.analyst_workload_pct > 50 ? OR : G}
+                tooltip="Workload of one analyst: each open escalated incident = 5%, each open critical = 10%. It can exceed 100% because routing logs the whole batch's review backlog at once before any human acts; it falls as incidents are reviewed in the queue."
               />
 
               {/* SLA Health — bar depletes as time runs out */}
@@ -143,6 +191,7 @@ export function TwinStatePanel({ twinState: ts, connected }: Props) {
                     value={fmtSla(ts.sla_remaining_s)}
                     barPct={usedPct}
                     barColor={slaColor}
+                    tooltip="Time left in the SLA budget. Modelled as 1 hour minus 90s per open incident (40 open = budget fully consumed). Driven by the open-incident count, not wall-clock time."
                   />
                 );
               })()}

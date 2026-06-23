@@ -120,6 +120,10 @@ export interface ExperimentResults {
   total_cost: number;
   avg_cost_per_incident: number;
   avg_resolution_time_s?: number | null;
+  // Average deliberation time over human-reviewed rows only (escalate/critical
+  // in hitl/human_only). null when no human-reviewed rows exist (e.g. ai_only).
+  avg_human_review_time_s?: number | null;
+  human_reviewed_count?: number;
   override_count: number;
   override_rate: number;
   started_at: string;
@@ -142,6 +146,8 @@ export interface DecisionStats {
   total_cost: number;
   avg_cost_per_incident: number;
   avg_resolution_time_s?: number | null;
+  avg_human_review_time_s?: number | null;
+  human_reviewed_count?: number;
   override_count: number;
   override_rate: number;
   cost_breakdown: Record<string, { count: number; total_cost: number }>;
