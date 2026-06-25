@@ -31,8 +31,12 @@ function fmtDuration(s?: number | null) {
   return s >= 60 ? `${(s / 60).toFixed(1)}m` : `${s.toFixed(1)}s`;
 }
 
-// Shared chart tooltip style
+// Shared chart tooltip style. labelStyle/itemStyle force light text so the
+// label and value are readable against the dark contentStyle background
+// (Recharts otherwise defaults them to near-black).
 const TIP_STYLE = { backgroundColor: '#16171E', border: `1px solid ${B}`, borderRadius: 8, fontSize: 12 };
+const TIP_LABEL_STYLE = { color: '#E8E9F0' };
+const TIP_ITEM_STYLE = { color: '#E8E9F0' };
 
 // Top-row stat card
 function StatCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
@@ -174,6 +178,7 @@ export function AnalyticsDashboard() {
                     <YAxis tick={{ fill: '#6B7A99', fontSize: 11 }} axisLine={false}
                       tickLine={false} allowDecimals={false} />
                     <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} contentStyle={TIP_STYLE}
+                      labelStyle={TIP_LABEL_STYLE} itemStyle={TIP_ITEM_STYLE}
                       formatter={(v) => [v, 'decisions']} />
                     <Bar dataKey="count" maxBarSize={52} radius={[4, 4, 0, 0]}>
                       {actionData.map((e, i) => <Cell key={i} fill={e.color} />)}
@@ -193,6 +198,7 @@ export function AnalyticsDashboard() {
                     <YAxis tick={{ fill: '#6B7A99', fontSize: 11 }} axisLine={false}
                       tickLine={false} tickFormatter={v => `€${v}`} />
                     <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} contentStyle={TIP_STYLE}
+                      labelStyle={TIP_LABEL_STYLE} itemStyle={TIP_ITEM_STYLE}
                       formatter={(v) => [`€${Number(v).toFixed(2)}`, 'cost']} />
                     <Bar dataKey="cost" maxBarSize={52} radius={[4, 4, 0, 0]}>
                       {costData.map((e, i) => <Cell key={i} fill={e.color} />)}

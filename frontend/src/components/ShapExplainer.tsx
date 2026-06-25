@@ -168,6 +168,8 @@ export function ShapExplainer({ incidentId }: Props) {
                   <Tooltip
                     cursor={{ fill: 'rgba(255,255,255,0.04)' }}
                     contentStyle={{ backgroundColor: '#16171E', border: `1px solid ${B}`, borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: '#E8E9F0' }}
+                    itemStyle={{ color: '#E8E9F0' }}
                     formatter={(val) => [Number(val).toFixed(4), 'SHAP value']}
                   />
                   <Bar dataKey="value" maxBarSize={22} radius={[0, 3, 3, 0]}>
