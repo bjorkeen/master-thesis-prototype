@@ -575,13 +575,11 @@ export function IncidentQueue({ onSelect, experimentActive = true }: Props) {
                       <Badge value={routing} />
                     </td>
 
-                    {/* Status badge — PENDING or action badge */}
+                    {/* Status badge — only ever PENDING or REVIEWED.
+                        Pending = analyst still needs to act; everything else
+                        (acted-on, auto-resolved, ai_only) is REVIEWED. */}
                     <td className="px-3 py-2.5 border-b" style={tc}>
-                      {pending
-                        ? <PendingBadge />
-                        : humanOnly
-                        ? <ReviewedBadge />
-                        : <Badge value={entry.ai_recommendation} />}
+                      {pending ? <PendingBadge /> : <ReviewedBadge />}
                     </td>
                   </tr>
 
