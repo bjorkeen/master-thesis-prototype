@@ -126,7 +126,19 @@ hitl-cdt/
 │   │   └── types/index.ts          # TypeScript interfaces for all API shapes
 │   ├── package.json
 │   └── vite.config.ts
+├── logs/                           # Created by start.sh: per-service logs + pids.txt
+│   ├── ml-service.log
+│   ├── twin-service.log
+│   ├── decision-service.log
+│   ├── gateway.log
+│   ├── frontend.log
+│   └── pids.txt                    # PIDs of running services (used by stop.sh)
+├── .vscode/
+│   └── tasks.json                  # VS Code "Start All HITL-CDT Services" compound task
+├── start.sh                        # One-command launcher (boots all 5 services + health checks)
+├── stop.sh                         # Gracefully stops everything start.sh launched
 ├── .gitignore                      # Repo root: .DS_Store, .venv, node_modules, build/, .env, …
+├── .gitattributes                  # Git attributes (line-ending / diff handling)
 ├── CLAUDE.md                       # AI assistant context file
 └── README.md                       # This file
 ```
@@ -171,7 +183,38 @@ python data/train_model.py        # → rf_model.joblib + SHAP plots
 python data/create_tables.py      # → data/hitl_cdt.db
 ```
 
-### 2. Start the Python services (3 terminals)
+### 2. Start everything (recommended — one command)
+
+The fastest way to launch all five services is the bundled `start.sh` script. It
+boots the ML, Twin, and Decision services, the gateway, and the frontend, writes each
+service's output to `logs/<service>.log`, polls every `/health` endpoint until the stack
+is ready, and records PIDs in `logs/pids.txt`.
+
+> **Note:** `start.sh` runs uvicorn from a `.venv/` virtual environment in the project
+> root. Create it once with the commands shown in [Step 0](#0-install-dependencies-first-time-only)
+> (`python -m venv .venv && source .venv/bin/activate`, then the `pip install` lines).
+
+```bash
+chmod +x start.sh stop.sh   # only needed the first time
+./start.sh                  # launches all 5 services + runs health checks
+./stop.sh                   # gracefully stops everything start.sh launched
+```
+
+Once it reports all services healthy:
+- Frontend → http://localhost:5173
+- API Gateway → http://localhost:4000
+- Swagger docs → http://localhost:8001/docs, http://localhost:8002/docs, http://localhost:8003/docs
+
+**VS Code users:** the workspace ships a `.vscode/tasks.json` with a compound task
+**"Start All HITL-CDT Services"** that launches all five services in dedicated terminal
+panels. Run it from the Command Palette (*Tasks: Run Build Task*) or press
+`Cmd+Shift+B` (macOS) / `Ctrl+Shift+B` (Windows). Note these tasks run uvicorn with
+`--reload`, so use `start.sh` (which omits `--reload`) for live participant sessions.
+
+Prefer to start each service by hand (or need to see logs inline)? Use the manual steps
+below instead.
+
+### 2a. (Manual alternative) Start the Python services (3 terminals)
 ```bash
 # Terminal 1 — ML Service
 cd services/ml-service && uvicorn main:app --port 8001
@@ -185,19 +228,19 @@ cd services/decision-service && uvicorn main:app --port 8003
 
 > For live participant sessions, avoid `--reload` to prevent accidental in-memory state resets.
 
-### 3. Start the gateway
+### 2b. (Manual alternative) Start the gateway
 ```bash
 cd gateway && npm install && node index.js   # npm install only needed the first time
 # → http://localhost:4000
 ```
 
-### 4. Start the frontend
+### 2c. (Manual alternative) Start the frontend
 ```bash
 cd frontend && npm install && npm run dev     # npm install only needed the first time
 # → http://localhost:5173
 ```
 
-### 5. Verify everything is running
+### 3. Verify everything is running
 ```bash
 curl http://localhost:4000/health       # gateway
 curl http://localhost:8001/health       # ML service
@@ -211,7 +254,18 @@ curl http://localhost:8003/health       # decision service
 - Decision Service: http://localhost:8003/docs
 
 ### Test the full routing chain
+
+`POST /route` requires an **active experiment run** — without one it returns
+`409 Conflict` ("No active experiment run."). So start a run first, route an incident,
+then stop the run:
+
 ```bash
+# 1. Start an experiment (so /route is allowed)
+curl -X POST http://localhost:4000/api/experiment/start \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "hitl", "incident_count": 100}'
+
+# 2. Route one incident through ML → Twin → Decision
 curl -X POST http://localhost:4000/api/route \
   -H "Content-Type: application/json" \
   -d '{
@@ -223,6 +277,9 @@ curl -X POST http://localhost:4000/api/route \
     "time_sensitivity": "critical",
     "data_domain": "finance"
   }'
+
+# 3. Stop the run when done (use ?force=true if any incidents are still pending)
+curl -X POST "http://localhost:4000/api/experiment/stop?force=true"
 ```
 
 ---
