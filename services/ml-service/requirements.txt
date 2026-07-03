@@ -13,5 +13,8 @@ joblib>=1.3.0
 # Explainability — MUST match training version
 shap>=0.51.0
 
+# HTTP client — used by GET /explain/{incident_id} to fetch features from Decision Service
+httpx>=0.27.0
+
 # Utilities
 python-multipart>=0.0.6

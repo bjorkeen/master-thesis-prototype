@@ -432,6 +432,27 @@ async def explain_features(incident: IncidentFeatures, explain_class: str = "esc
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Explanation failed: {exc}")
 
 
+@app.get("/explain/global", response_model=GlobalImportanceResponse, tags=["Explainability"])
+async def global_importance():
+    """
+    Return the mean decrease in impurity (MDI) feature importance from the forest.
+
+    This is a fast alternative to SHAP for a high-level view of which
+    features drive decisions across all incidents.
+
+    Registered BEFORE /explain/{incident_id} so FastAPI does not treat
+    the literal path segment "global" as an incident ID.
+    """
+    if model is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model not loaded")
+
+    importances = model.feature_importances_.tolist()
+    return GlobalImportanceResponse(
+        feature_names=feature_names,
+        importances=importances,
+    )
+
+
 @app.get("/explain/{incident_id}", response_model=ExplanationResponse, tags=["Explainability"])
 async def explain_by_id(incident_id: str, explain_class: str = "escalate"):
     """
@@ -492,24 +513,6 @@ async def explain_by_id(incident_id: str, explain_class: str = "escalate"):
                 f"Decision Service returned an error: {exc.response.text}",
             )
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Explanation failed: {exc}")
-
-
-@app.get("/explain/global", response_model=GlobalImportanceResponse, tags=["Explainability"])
-async def global_importance():
-    """
-    Return the mean decrease in impurity (MDI) feature importance from the forest.
-
-    This is a fast alternative to SHAP for a high-level view of which
-    features drive decisions across all incidents.
-    """
-    if model is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model not loaded")
-
-    importances = model.feature_importances_.tolist()
-    return GlobalImportanceResponse(
-        feature_names=feature_names,
-        importances=importances,
-    )
 
 
 @app.get("/", tags=["Info"])

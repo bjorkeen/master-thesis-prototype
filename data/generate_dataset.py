@@ -312,9 +312,9 @@ print_cat("data_domain",        "data_domain")
 
 print("\n── Ambiguity zone estimate ─────────────────────────────────")
 # Ambiguity zone: incidents whose raw score and noisy score straddle a threshold
-crossed_low  = ((severity_score_raw < T_LOW)  != (severity_score < T_LOW)).sum()
-crossed_high = ((severity_score_raw < T_HIGH) != (severity_score < T_HIGH)).sum()
-ambiguous    = crossed_low + crossed_high
+crossed_low  = (severity_score_raw < T_LOW)  != (severity_score < T_LOW)
+crossed_high = (severity_score_raw < T_HIGH) != (severity_score < T_HIGH)
+ambiguous    = (crossed_low | crossed_high).sum()   # union — count each incident once
 print(f"  Incidents that crossed a threshold due to noise: {ambiguous} ({ambiguous/N*100:.1f} %)")
 
 print("\n" + "=" * 60)

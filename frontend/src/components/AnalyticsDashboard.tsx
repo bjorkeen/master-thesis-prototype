@@ -212,16 +212,29 @@ export function AnalyticsDashboard() {
             <div className="rounded-xl p-5" style={{ backgroundColor: '#16171E', border: `1px solid ${B}` }}>
               <div className="flex items-center gap-3 mb-4">
                 <p className="text-sm font-semibold">Override Statistics</p>
-                <span className="text-xs px-2.5 py-0.5 rounded-full"
-                  style={{ backgroundColor: 'rgba(232,145,58,0.15)', color: '#E8913A' }}>
-                  {stats.override_count} override{stats.override_count !== 1 ? 's' : ''}
-                </span>
-                <span className="text-xs" style={{ color: '#6B7A99' }}>
-                  {(stats.override_rate * 100).toFixed(1)}% rate
-                </span>
+                {stats.override_rate_applicable === false ? (
+                  <span className="text-xs px-2.5 py-0.5 rounded-full"
+                    style={{ backgroundColor: 'rgba(107,122,153,0.15)', color: '#6B7A99' }}>
+                    N/A — human_only mode
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'rgba(232,145,58,0.15)', color: '#E8913A' }}>
+                      {stats.override_count ?? 0} override{(stats.override_count ?? 0) !== 1 ? 's' : ''}
+                    </span>
+                    <span className="text-xs" style={{ color: '#6B7A99' }}>
+                      {((stats.override_rate ?? 0) * 100).toFixed(1)}% rate
+                    </span>
+                  </>
+                )}
               </div>
 
-              {overrides.length === 0
+              {stats.override_rate_applicable === false ? (
+                <p className="text-sm" style={{ color: '#6B7080' }}>
+                  Override rate is not reported in human_only mode — the AI recommendation is hidden from participants.
+                </p>
+              ) : overrides.length === 0
                 ? <p className="text-sm" style={{ color: '#6B7080' }}>No human overrides recorded.</p>
                 : overrides.slice(0, 5).map(d => (
                     <div key={d.decision_id} className="flex items-center gap-3 text-xs py-2"

@@ -124,8 +124,10 @@ export interface ExperimentResults {
   // in hitl/human_only). null when no human-reviewed rows exist (e.g. ai_only).
   avg_human_review_time_s?: number | null;
   human_reviewed_count?: number;
-  override_count: number;
-  override_rate: number;
+  override_count?: number | null;
+  override_rate?: number | null;
+  /** False in human_only mode — override metrics are not meaningful there. */
+  override_rate_applicable?: boolean;
   started_at: string;
   completed_at?: string | null;
   cost_breakdown: Record<string, { count: number; total_cost: number }>;
@@ -148,8 +150,10 @@ export interface DecisionStats {
   avg_resolution_time_s?: number | null;
   avg_human_review_time_s?: number | null;
   human_reviewed_count?: number;
-  override_count: number;
-  override_rate: number;
+  override_count?: number | null;
+  override_rate?: number | null;
+  /** False in human_only mode — override metrics are not meaningful there. */
+  override_rate_applicable?: boolean;
   cost_breakdown: Record<string, { count: number; total_cost: number }>;
 }
 

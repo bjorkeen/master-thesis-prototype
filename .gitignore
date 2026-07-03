@@ -31,3 +31,7 @@ build/
 .idea/
 *.swp
 *.swo
+
+# Runtime logs and PID files (written by start.sh / stop.sh)
+logs/
+logs/pids.txt

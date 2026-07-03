@@ -90,6 +90,30 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** Mode-aware subtitles for the routing breakdown cards (class-aware HITL, not flat bands). */
+function routingSubtitles(mode: ExperimentMode): { auto: string; escalate: string; critical: string } {
+  switch (mode) {
+    case 'hitl':
+      return {
+        auto: 'predicted auto_resolve + conf ≥ T_auto',
+        escalate: 'predicted escalate, or auto_resolve below threshold',
+        critical: 'predicted critical (never auto), or low-confidence escalate',
+      };
+    case 'ai_only':
+      return {
+        auto: 'AI routed auto_resolve (class direct)',
+        escalate: 'AI routed escalate',
+        critical: 'AI routed critical',
+      };
+    case 'human_only':
+      return {
+        auto: 'not used — all incidents → human',
+        escalate: 'every incident queued for review',
+        critical: 'not used — all incidents → human',
+      };
+  }
+}
+
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 // Single result stat cell
@@ -627,7 +651,7 @@ export function ExperimentControl({ setActivePanel, onStopped }: ExperimentContr
               </div>
             )}
 
-            {/* ── Routing Breakdown — 3 cards by confidence threshold ── */}
+            {/* ── Routing Breakdown — mode-aware class-aware routing ── */}
             {batchTotal > 0 && (
               <div className="flex flex-col gap-2" style={{ borderTop: `1px solid ${B}`, paddingTop: 16 }}>
                 <p className="text-xs font-semibold" style={{ color: '#6B7A99' }}>Routing Breakdown</p>
@@ -635,19 +659,19 @@ export function ExperimentControl({ setActivePanel, onStopped }: ExperimentContr
                   <RoutingCard
                     label="Auto-resolved"
                     count={Math.max(0, batchDone - batchEscalated - batchCritical)}
-                    subtitle="confidence ≥ 0.85"
+                    subtitle={routingSubtitles(mode).auto}
                     color="#3EBD8C"
                   />
                   <RoutingCard
                     label="Escalated"
                     count={batchEscalated}
-                    subtitle="confidence 0.50–0.85"
+                    subtitle={routingSubtitles(mode).escalate}
                     color="#E8913A"
                   />
                   <RoutingCard
                     label="Critical"
                     count={batchCritical}
-                    subtitle="confidence < 0.50"
+                    subtitle={routingSubtitles(mode).critical}
                     color="#E5534B"
                   />
                 </div>
@@ -847,8 +871,23 @@ export function ExperimentControl({ setActivePanel, onStopped }: ExperimentContr
                 color="#4C8BF5"
               />
               <Stat label="Incidents"    value={String(results.total_incidents)} />
-              <Stat label="Overrides"    value={String(results.override_count)} />
-              <Stat label="Override Rate" value={`${(results.override_rate * 100).toFixed(1)}%`}  color="#E8913A" />
+              <Stat
+                label="Overrides"
+                value={
+                  results.override_rate_applicable === false
+                    ? 'N/A'
+                    : String(results.override_count ?? 0)
+                }
+              />
+              <Stat
+                label="Override Rate"
+                value={
+                  results.override_rate_applicable === false
+                    ? 'N/A'
+                    : `${((results.override_rate ?? 0) * 100).toFixed(1)}%`
+                }
+                color="#E8913A"
+              />
             </div>
 
             {results.completed_at && (

@@ -11,7 +11,8 @@ Run this script once (and again whenever you regenerate incidents.csv):
 
 Outputs written to data/:
     rf_model.joblib       – trained RandomForestClassifier
-    feature_encoder.joblib – OrdinalEncoder fitted on the 7 input features
+    feature_encoder.joblib – OrdinalEncoder fitted on the 6 categorical features
+                             (affected_records_pct is numeric and passes through)
     label_encoder.joblib  – LabelEncoder that maps string labels ↔ integers
     feature_names.json    – ordered list of feature column names
     shap_summary.png      – beeswarm plot: which features matter most globally
@@ -87,8 +88,9 @@ print("\n" + "=" * 60)
 print("STEP 2 – Encoding features")
 print("=" * 60)
 
-# Identify categorical columns (everything except the numeric 'affected_records_pct')
-CATEGORICAL_COLS = [c for c in FEATURE_COLS if X[c].dtype == object]
+# Identify categorical columns (everything except the numeric 'affected_records_pct').
+# Do NOT rely on dtype == object — pandas 2.x reads CSV strings as str, not object.
+CATEGORICAL_COLS = [c for c in FEATURE_COLS if c != "affected_records_pct"]
 print(f"  Categorical features being encoded: {CATEGORICAL_COLS}")
 print(f"  Numeric features left as-is       : ['affected_records_pct']")
 

@@ -12,11 +12,12 @@ This is the "brain" of the system.  Every incident flows through here:
   5.  Decisions are logged in memory for evaluation and export
 
 Three experiment modes control what "routing" means:
-  ai_only    – AI decides everything; human never sees the incident
-  human_only – AI prediction is ignored; all incidents go to human review
-  hitl       – confidence > 0.85 → auto_resolve
-                confidence < 0.50 → critical
-                otherwise          → escalate (human reviews with AI hint)
+  ai_only    – AI predicted class is the routing decision (confidence ignored)
+  human_only – every incident is routed to escalate (human review; AI ignored)
+  hitl       – class-aware, safety-first routing (_apply_routing_logic):
+                 predicted critical  → always critical (never auto-resolved)
+                 predicted auto_resolve → auto_resolve if confidence ≥ T_auto, else escalate
+                 predicted escalate  → critical if confidence < T_crit, else escalate
 
 Start from the project root:
     python3 -m uvicorn services.decision-service.main:app --port 8003 --reload
@@ -216,8 +217,9 @@ class ExperimentResults(BaseModel):
     avg_resolution_time_s: Optional[float]
     avg_human_review_time_s: Optional[float] = None
     human_reviewed_count: int = 0
-    override_count:       int
-    override_rate:        float
+    override_count:       Optional[int] = None
+    override_rate:        Optional[float] = None
+    override_rate_applicable: bool = True
     started_at:           str
     completed_at:         Optional[str]
     cost_breakdown:       Dict[str, Any]
@@ -398,8 +400,8 @@ def _compute_cost(final_action: str, ground_truth: str) -> float:
     if ground_truth == "auto_resolve" and final_action in ("escalate", "critical"):
         return float(cost_cfg.get("false_escalation", 10))
 
-    # Any remaining mismatch (e.g. critical routed as escalate but GT=escalate
-    # is already covered above; here we catch critical→escalate etc.)
+    # Fallback for uncommon mismatches (e.g. escalate vs critical); uses
+    # false_escalation cost — human_misclassification in cost_model.yaml is NOT applied.
     return float(cost_cfg.get("false_escalation", 10))
 
 
@@ -487,6 +489,12 @@ def _compute_stats(decisions: List[dict]) -> dict:
     resolved = [d for d in decisions if not _is_pending_human_review(d)]
     pending_count = total_logged - len(resolved)
     total = len(resolved)
+    # Mode may be known from pending rows even when nothing is resolved yet.
+    run_mode = next(
+        (d.get("experiment_mode") for d in decisions if d.get("experiment_mode")),
+        None,
+    )
+    override_rate_applicable = run_mode != "human_only"
     if total == 0:
         return {
             "total_decisions": 0,
@@ -499,13 +507,21 @@ def _compute_stats(decisions: List[dict]) -> dict:
             "avg_resolution_time_s": None,
             "avg_human_review_time_s": None,
             "human_reviewed_count": 0,
-            "override_count": 0,
-            "override_rate": 0.0,
+            "override_count": 0 if override_rate_applicable else None,
+            "override_rate": 0.0 if override_rate_applicable else None,
+            "override_rate_applicable": override_rate_applicable,
             "cost_breakdown": {},
         }
 
     correct   = sum(1 for d in resolved if d.get("is_correct") is True)
     total_cost = sum(d.get("cost", 0.0) or 0.0 for d in resolved)
+    # In human_only mode the AI recommendation is never shown to the participant,
+    # so rows where human_action != ai_recommendation do NOT represent a true
+    # "override" and must not be compared with the HITL override rate. We report
+    # None for those metrics (stored decision rows are left untouched).
+    if run_mode is None:
+        run_mode = resolved[0].get("experiment_mode")
+        override_rate_applicable = run_mode != "human_only"
     overrides  = sum(1 for d in resolved if d.get("human_override_to") is not None)
 
     # Resolution times (only for decisions where it was recorded).
@@ -553,8 +569,12 @@ def _compute_stats(decisions: List[dict]) -> dict:
         "avg_resolution_time_s": avg_time,
         "avg_human_review_time_s": avg_human_review_time,
         "human_reviewed_count":  len(human_reviewed),
-        "override_count":       overrides,
-        "override_rate":        round(overrides / total, 4) if total else 0.0,
+        "override_count":       overrides if override_rate_applicable else None,
+        "override_rate":        (
+            round(overrides / total, 4) if override_rate_applicable and total else
+            (0.0 if override_rate_applicable else None)
+        ),
+        "override_rate_applicable": override_rate_applicable,
         "cost_breakdown":       breakdown,
     }
 
@@ -914,6 +934,9 @@ async def override_decision(decision_id: str, override: OverrideRequest):
 
     # Update the record in-place
     doc["human_action"]       = override.new_action
+    # human_override_to is only set when the human disagrees with ai_recommendation.
+    # In human_only mode the AI recommendation is hidden; human_action != ai_recommendation
+    # is NOT a meaningful "override" for stats (see _compute_stats).
     doc["human_override_to"] = (
         override.new_action if override.new_action != doc.get("ai_recommendation") else None
     )
@@ -1132,6 +1155,7 @@ async def stop_experiment(
         human_reviewed_count=stats["human_reviewed_count"],
         override_count=stats["override_count"],
         override_rate=stats["override_rate"],
+        override_rate_applicable=stats["override_rate_applicable"],
         started_at=experiment["started_at"],
         completed_at=experiment["stopped_at"],
         cost_breakdown=stats["cost_breakdown"],
@@ -1175,7 +1199,8 @@ async def export_decisions(
     ?run_id=ABC12345 → only decisions from that run
     No run_id        → current experiment run's decisions
 
-    The CSV is streamed directly — no temp file is created.
+    The CSV is built in an in-memory StringIO buffer and streamed via
+    StreamingResponse — no temp file is written to disk.
     Open in Excel, pandas, or any spreadsheet tool.
 
     Example:
