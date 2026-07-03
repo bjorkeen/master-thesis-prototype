@@ -29,7 +29,7 @@ separate from the service deps — do not assume installing the services covers 
   Optional `psycopg2-binary` (commented) only if `DATABASE_URL` points at PostgreSQL; db.py imports
   psycopg2 lazily and falls back to SQLite otherwise.
 - `services/ml-service/requirements.txt` — fastapi, uvicorn, pandas, numpy, scikit-learn, joblib,
-  shap, python-multipart (runtime model + SHAP serving).
+  shap, httpx, python-multipart (runtime model + SHAP serving; httpx used by GET /explain/{id}).
 - `services/twin-service/requirements.txt` — fastapi, uvicorn, python-multipart only (pure state engine,
   no ML/DB deps).
 - `services/decision-service/requirements.txt` — fastapi, uvicorn, httpx (calls ML+Twin), pyyaml
@@ -42,10 +42,10 @@ separate from the service deps — do not assume installing the services covers 
 Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
 
 ### Phase 1 — Data Science Foundation
-- data/generate_dataset.py — generates 3,000 synthetic incidents (60/30/10 distribution, ~32% ambiguity zone)
-- data/train_model.py — trains RandomForest (200 trees, balanced weights), generates SHAP plots
+- data/generate_dataset.py — generates 3,000 synthetic incidents (60/30/10 distribution, ~30.2% ambiguity zone — 907/3000)
+- data/train_model.py — trains RandomForest (200 trees, balanced weights), generates SHAP plots; by-name categorical handling for pandas 2.x/py3.13
 - data/incidents.csv — 3,000 rows, 7 features + severity scores + ground truth labels
-- data/rf_model.joblib — trained model (68.3% accuracy, macro F1=0.57)
+- data/rf_model.joblib — committed thesis model (68.3% accuracy, macro F1=0.57); use as-is for replication — retraining yields non-bit-identical artefacts
 - data/feature_encoder.joblib — OrdinalEncoder for 6 categorical features
 - data/label_encoder.joblib — maps auto_resolve/critical/escalate to integers
 - data/feature_names.json — ordered list of 7 feature column names
@@ -84,7 +84,7 @@ Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
   - time_sensitivity: low, medium, high, critical
   - data_domain: finance, marketing, operations, hr, product, compliance
 - affected_records_pct: continuous 0.1–100.0, Beta distribution (mean ~23%)
-- ~32% of incidents in ambiguity zone (Gaussian noise σ=0.10)
+- ~30.2% of incidents in ambiguity zone (907 of 3,000; Gaussian noise σ=0.10; boolean-OR union in summary stat)
 - Ground truth via probabilistic scoring with domain multiplier + noise + percentile thresholds (T1=0.468, T2=0.609)
 - ML model: RandomForest, 200 trees, class_weight='balanced', OrdinalEncoder for categoricals
 - Model performance: auto_resolve F1=0.82, escalate F1=0.46, critical F1=0.43, macro F1=0.57
@@ -99,6 +99,7 @@ Phase 1-3 complete. Phase 4 (experiments + thesis write-up) in progress.
 - Active-open SLA correction (decision service /route): SLA-boost would otherwise tighten T_auto/T_crit as the twin's open_incidents climbs during the unattended batch sweep, starving auto-resolve. /route computes `active_open = open_incidents − pending_backlog` (pending_backlog = this run's not-yet-reviewed rows) and only lets the SLA drain the thresholds when active_open > 0; during the batch sweep active_open ≈ 0, so routing uses the base gates and each incident is judged on its own confidence.
 - SLA boost schedule: thresholds tighten when SLA < 10 min (auto +10%, crit +5%) or < 5 min (auto +20%, crit +10%); auto capped at 0.999
 - Cost model: correct_auto=€0, correct_escalate=€10, correct_critical=€15, false_escalation=€10, missed_escalation=€50, missed_critical=€100, human_misclassification=€30 (defined in cost_model.yaml; human_misclassification not currently referenced by _compute_cost)
+- **Model artefacts (replication):** committed rf_model.joblib trained under sklearn 1.6.1; reproduces thesis results (AI-only accuracy 89.0%; HITL routing split 14/70/16 on seed-42 sample). Re-running train_model.py on pandas 2.x/py3.13/sklearn 1.9.x yields a functionally equivalent but not bit-identical model — routing split may shift (e.g. 14 → 12 auto-resolved). Use committed artefacts as-is for replication.
 
 ## Project Structure
 ```
@@ -213,7 +214,7 @@ started_at (TIMESTAMP), completed_at (TIMESTAMP NULL)
 - POST /decisions/{id}/override — records human decision update for the active run only; sets human_action + final_action, and sets human_override_to only when the new action differs from ai_recommendation. If the row was pending, sends a Twin `resolve` event using `routing_action` (not `final_action`) as the severity so counters match the original `arrive` event
 - GET /decisions/incident/{incident_id} — returns the latest logged (flattened) decision for one incident_id; used by ML Service /explain/{incident_id} to fetch the exact routed feature set
 - GET /decisions/log?page=1&page_size=20&mode=hitl&run_id=X — paginated decision history
-- GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; returns cost_breakdown (not by_action)
+- GET /decisions/stats?run_id=X — accuracy, cost, timing, override metrics; returns cost_breakdown (not by_action). In human_only mode override_count/override_rate are null and override_rate_applicable is false.
 - POST /experiment/start — input: {mode, incident_count} → begins new run, resets Twin, and **wipes the in-memory `decision_log` + `decision_index`** (clean slate per run; export the previous run first if needed)
 - POST /experiment/stop?force=false — ends run (sets `active=False`), computes final ExperimentResults. Returns 409 if incidents are still pending human review unless `?force=true` (force-reset / demo). **Keeps `experiment["run_id"]`** so post-stop analytics/export still resolve to the completed run; new writes are blocked by the `active=False` guard in /route, /decisions, and /decisions/{id}/override
 - GET /experiment/results — returns ExperimentResults for last completed run
@@ -228,7 +229,9 @@ Each service has a different URL prefix, so each proxy uses its own pathRewrite:
 |---|---|---|
 | /api/predict/**, /api/explain/**, /api/model/** | ^/api | :8001 /predict/…, /explain/…, /model/… |
 | /api/twin/** | ^/api/twin | :8002 /state, /sla, /simulate, /reset |
-| /api/decisions*, /api/experiment*, /api/config*, /api/route*, /api/incidents*, /api/health | ^/api | :8003 /decisions/…, /experiment/…, /route, /incidents/…, /health |
+| /api/decisions*, /api/experiment*, /api/route*, /api/incidents*, /api/health | ^/api | :8003 /decisions/…, /experiment/…, /route, /incidents/…, /health |
+
+Note: `/api/config*` appears in the gateway pathFilter for forward-compatibility, but the Decision Service defines **no** `/config` endpoints.
 
 Note: the decision proxy uses a `pathFilter` predicate (prefix checks via `path.startsWith`), not a glob array, so `/api/health` routes to the Decision Service. The gateway also serves its OWN `/health` (no `/api` prefix) for a gateway-level liveness check — these are two distinct paths. The ML and Twin proxies use glob `**` pathFilters.
 
@@ -288,7 +291,8 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
 - ExperimentControl "Reviewed" count is computed by polling GET /decisions/log every 10 s and
   counting rows where `human_action != null AND routing_action != 'auto_resolve'`. This counts
   both accepts and overrides correctly. Do NOT use stats.override_count — that only counts
-  disagreements (rows where human changed the AI recommendation).
+  disagreements (rows where human changed the AI recommendation). In human_only mode
+  override_count/override_rate are null (override_rate_applicable: false) — not comparable to HITL.
 - ExperimentControl restores state after page refresh via a mount-only useEffect that calls
   GET /api/health and GET /api/decisions/stats, then rehydrates running/runInfo/batchCounters
   from the backend if an experiment is active.
@@ -341,7 +345,8 @@ endpoints have no /twin prefix — they are /state, /sla, etc.
   - DecisionStats uses cost_breakdown: Record<string, {count, total_cost}> (not by_action)
   - Decision.routing_action uses 'auto_resolve'|'escalate'|'critical' (not send_to_human/critical_alert)
   - HITL routing in backend is class-aware safety-first (critical class is never auto-resolved)
-  - ExperimentResults includes correct_decisions, avg_cost_per_incident, cost_breakdown
+  - ExperimentResults includes correct_decisions, avg_cost_per_incident, cost_breakdown,
+    override_rate_applicable (false in human_only mode)
 
 ## Important Notes for Claude Code
 - I am a beginner. Please write complete files with detailed comments explaining each part.

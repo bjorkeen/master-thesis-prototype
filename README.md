@@ -14,19 +14,19 @@
 This prototype implements and evaluates a framework that combines four research pillars:
 
 - **Human-in-the-Loop AI** — structured human oversight and decision override capabilities
-- **Decision Intelligence** — confidence-based decision routing and escalation logic
+- **Decision Intelligence** — class-aware, confidence-gated routing and escalation logic
 - **Cognitive Digital Twin** — a state-aware process model that provides operational context for decisions
 - **Explainable AI (XAI)** — SHAP-based explanations that help humans understand AI recommendations
 
 The system classifies data quality incidents into three categories:
 
-| Action | Description | Trigger |
-|--------|-------------|---------|
-| **Auto-resolve** | Routine issue, AI handles automatically | Confidence ≥ 0.85 |
-| **Escalate** | Ambiguous, needs human review with AI recommendation + SHAP explanation | Confidence 0.50–0.85 |
-| **Critical** | Urgent, requires immediate human attention | Confidence < 0.50 |
+| Action | Description | HITL routing (class-aware) |
+|--------|-------------|----------------------------|
+| **Auto-resolve** | Routine issue, AI handles automatically | AI predicts `auto_resolve` **and** confidence ≥ 0.85 |
+| **Escalate** | Ambiguous, needs human review with AI recommendation + SHAP explanation | AI predicts `escalate` **and** confidence ≥ 0.50; **or** AI predicts `auto_resolve` but confidence < 0.85 |
+| **Critical** | Urgent, requires immediate human attention | AI predicts `critical` at **any** confidence (safety-first); **or** AI predicts `escalate` **and** confidence < 0.50 |
 
-> The "Trigger" column is the intuition; the actual HITL routing is **class-aware** (see `_apply_routing_logic`): the AI's predicted class is consulted first — a `critical` class is always routed critical and never auto-resolved (safety-first) — then the confidence gates decide whether an `auto_resolve` class is confident enough to auto-close (else it escalates) and whether an `escalate` class is uncertain enough to flag critical. AI-only mode follows the predicted class directly; Human-only mode escalates everything.
+> HITL routing is implemented in `_apply_routing_logic` (services/decision-service/main.py): the AI's **predicted class** is consulted first — a `critical` prediction is always routed critical and never auto-resolved — then confidence gates apply as in the table. **AI-only** mode uses the predicted class directly (thresholds ignored). **Human-only** mode routes every incident to `escalate` (AI ignored).
 
 Three experimental modes are compared:
 - **AI-only** — all incidents decided by the ML model automatically
@@ -179,9 +179,11 @@ npm install --prefix frontend
 ### 1. Generate the dataset (first time only)
 ```bash
 python data/generate_dataset.py   # → data/incidents.csv
-python data/train_model.py        # → rf_model.joblib + SHAP plots
+python data/train_model.py        # → rf_model.joblib + SHAP plots (only if regenerating from scratch)
 python data/create_tables.py      # → data/hitl_cdt.db
 ```
+
+> **Replication:** The committed model artefacts in `data/` (`rf_model.joblib`, encoders, plots) are the exact model behind the thesis results. Use them as-is for replication — you do **not** need to re-run `train_model.py`. See [Model & Reproducibility](#model--reproducibility) below.
 
 ### 2. Start everything (recommended — one command)
 
@@ -290,7 +292,7 @@ curl -X POST "http://localhost:4000/api/experiment/stop?force=true"
 |-----------|-------|--------|
 | Dataset size | 3,000 incidents | data/generate_dataset.py |
 | Class distribution | 60% auto_resolve / 30% escalate / 10% critical | Thesis §3.3 |
-| Ambiguity zone | ~32% of incidents | Gaussian noise σ=0.10 |
+| Ambiguity zone | ~30.2% of incidents (907 of 3,000) | Gaussian noise σ=0.10; boolean-OR union in generate_dataset.py summary |
 | Features | 7 (6 categorical + 1 continuous) | Thesis §3.3.2 |
 | ML model | RandomForest, 200 trees, balanced weights | data/train_model.py |
 | HITL routing policy | Class-aware with confidence gates (critical safety-first, guarded auto-resolve) | services/decision-service/main.py |
@@ -299,6 +301,19 @@ curl -X POST "http://localhost:4000/api/experiment/stop?force=true"
 | Missed critical cost | €100 | config/cost_model.yaml |
 | False escalation cost | €10 | config/cost_model.yaml |
 | Experiment incidents | 100 per run | Thesis §3.4 |
+
+---
+
+## Model & Reproducibility
+
+The committed model artefacts in `data/` (`rf_model.joblib`, `feature_encoder.joblib`, `label_encoder.joblib`, …) were trained under the **original environment** (scikit-learn 1.6.1) and reproduce the thesis experimental results:
+
+- **AI-only accuracy:** 89.0%
+- **HITL routing split** (100 incidents, seed 42): 14 auto-resolved / 70 escalated / 16 critical
+
+**For replication:** load and use these committed artefacts as-is. Do not re-run `data/train_model.py` unless you are deliberately regenerating the full pipeline from scratch.
+
+Re-training on a newer stack (pandas 2.x / Python 3.13, scikit-learn 1.9.x) can produce a functionally equivalent but **not bit-identical** model; confidence scores may shift slightly and the HITL routing split can change (e.g. 14 → 12 auto-resolved). The current `train_model.py` includes by-name categorical-column handling required for pandas 2.x / Python 3.13, but that applies only when you choose to retrain.
 
 ---
 
@@ -374,7 +389,7 @@ All six panels stay mounted at all times (inactive ones are hidden with `display
 **ExperimentControl highlights:**
 - Mode selector is locked (greyed out) while a run is in progress
 - After the batch completes, shows a "Go to queue →" CTA banner when human-review incidents remain
-- Routing breakdown cards show how many incidents were auto-resolved / escalated / critical (confidence-based, regardless of mode)
+- Routing breakdown cards show how many incidents were auto-resolved / escalated / critical (mode-aware subtitles describe class-aware HITL routing, not flat confidence bands)
 - "Reviewed" count polls `/api/decisions/log` every 10 s and counts rows where `human_action != null AND routing_action != 'auto_resolve'` (accepts and overrides both count)
 - Page refresh during a live run restores all counters from backend state on mount
 - Export CSV and Stop Experiment buttons are visible while a run is active; a **Force Stop** control (two-click arm → confirm) calls `/api/experiment/stop?force=true` + `/api/twin/reset` to reset mid-run
@@ -400,7 +415,7 @@ This prototype is the practical artefact for a Design Science Research (DSR) the
 - **H2**: Explainable AI outputs positively influence human trust and decision calibration
 - **H3**: The CDT architecture supports structured human oversight without unacceptable latency
 
-The live prototype computes resolved-decision metrics (accuracy, cost, resolution time, override rate) per run.
+The live prototype computes resolved-decision metrics (accuracy, cost, resolution time, override rate) per run. Override rate is **not applicable** in human-only mode (the AI recommendation is never shown to participants; stats return `override_rate_applicable: false`).
 Macro-F1, trust (Likert), and end-to-end latency are analyzed in the experimental data-analysis phase.
 
 ---
